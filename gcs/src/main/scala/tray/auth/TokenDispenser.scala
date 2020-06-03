@@ -1,21 +1,19 @@
 package tray.auth
 
-import cats.Monad
-import cats.effect.IO
+import cats.effect.Sync
 import com.google.auth.oauth2.{AccessToken, GoogleCredentials}
 
-class TokenDispenser[F[_]](creds: GoogleCredentials)(implicit F: Monad[F]) {
+class TokenDispenser[F[_]](creds: GoogleCredentials)(implicit S: Sync[F]) {
     def getToken: F[AccessToken] =
-        F.pure{
+        S.delay{
             creds.refreshIfExpired()
             creds.getAccessToken
         }
 }
 
 object TokenDispenser {
-    def apply[F[_]: Monad](creds: GoogleCredentials): TokenDispenser[F] = new TokenDispenser[F](creds)
+    def apply[F[_]: Sync](creds: GoogleCredentials): TokenDispenser[F] = new TokenDispenser[F](creds)
 
-    def apply[F[_]: Monad]: IO[TokenDispenser[F]] = for {
-        creds <- IO(GoogleCredentials.getApplicationDefault)
-    } yield  TokenDispenser(creds)
+    def apply[F[_]](implicit S: Sync[F]): F[TokenDispenser[F]] =
+        S.map(S.delay(GoogleCredentials.getApplicationDefault))(creds => new TokenDispenser(creds))
 }
