@@ -36,7 +36,11 @@ lazy val root = (project in file("root"))
       catsEffect,
       fs2Core,
       fs2IO,
-      scalaTest
+      http4sCore,
+      http4sDsl,
+      http4sClient,
+      scalaTest,
+      googleCreds
     )
   )
   .dependsOn(gcs)

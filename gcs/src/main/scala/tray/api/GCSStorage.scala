@@ -1,11 +1,11 @@
 package tray.api
 
-import cats.effect.{ConcurrentEffect, IO, Resource, Sync}
-import cats.{Id, Monad}
+import cats.Monad
+import cats.effect.{ConcurrentEffect, Resource, Sync}
+import org.http4s._
 import org.http4s.client.Client
 import org.http4s.client.asynchttpclient.AsyncHttpClient
 import org.http4s.headers.{Accept, Authorization}
-import org.http4s._
 import tray.GCSItem
 import tray.auth.TokenDispenser
 import tray.underlying.StorageEndpoints
@@ -15,7 +15,7 @@ class GCSStorage[F[_]]
   (client: Client[F], tokenDispenser: TokenDispenser[F])(implicit F: Monad[F], S: Sync[F]) {
   import StorageEndpoints._
 
-  def authedRequest[A, R](m: Method, uri: Uri)(handler: Response[F] => F[R]): F[R] = client.fetch{
+  private def authedRequest[A, R](m: Method, uri: Uri)(handler: Response[F] => F[R]): F[R] = client.fetch{
     F.map(tokenDispenser.getToken){ token =>
         val creds: Credentials.Token = Credentials.Token(AuthScheme.Bearer, token.getTokenValue)
 
@@ -41,7 +41,7 @@ class GCSStorage[F[_]]
 }
 
 object GCSStorage {
-  def apply[F[_]: ConcurrentEffect](td: TokenDispenser[F]): Resource[Id, GCSStorage[F]] =
+  def apply[F[_]: ConcurrentEffect](td: TokenDispenser[F]): Resource[F, GCSStorage[F]] =
     AsyncHttpClient.resource[F](AsyncHttpClient.defaultConfig).map(c => new GCSStorage[F](c, td))
 
   def apply[F[_]: ConcurrentEffect](client: Client[F], td: TokenDispenser[F]): GCSStorage[F] =
