@@ -7,12 +7,9 @@ object StorageEndpoints {
   import org.http4s._
   import org.http4s.implicits._
 
-  private val base: Uri = uri"https://storage.googleapis.com"
-  private val storageVersion = "v1"
-  private val baseUrl: Uri = base / "storage" / storageVersion
-
-  // private def uploadUrl(bucketName: String): String = base + "/upload" + storageVersion + "/b" + bucketName + "/o"
-  // private def batchUrl(path: String): String = base + "/batch" + storageVersion + "/" + path
+  protected val base: Uri = uri"https://storage.googleapis.com"
+  protected val storageVersion = "v1"
+  val baseUrl: Uri = base / "storage" / storageVersion
 
   object Objects {
     val suffix = "o"

@@ -11,13 +11,19 @@ object Main extends IOApp {
   val storage: Resource[IO, GCSStorage[IO]] = GCSStorage[IO](td.unsafeRunSync())
 
   override def run(args: List[String]): IO[ExitCode] = {
-    val a: IO[Unit] = storage
+    storage
       .use{ storage =>
-        storage
-          .getObject(GCSItem("os-valdemargr", "test"))
-          .map(ab => println(new String(ab)))
-      }
+        /*storage
+          .getObject(GCSItem("os-valdemargr", "tmp.py"))
+          .map(ab => println(new String(ab)))*/
 
-    a.as(ExitCode.Success)
+        val a = storage.getB(GCSItem("os-valdemargr", "test"))
+
+        val ab: storage.UnfinishedBatch = a
+
+        storage
+          .batched(IO.pure(ab))
+          .map(ab => println(new String(ab)))
+      }.as(ExitCode.Success)
   }
 }
