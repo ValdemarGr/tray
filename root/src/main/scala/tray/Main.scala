@@ -17,13 +17,15 @@ object Main extends IOApp {
           .getObject(GCSItem("os-valdemargr", "tmp.py"))
           .map(ab => println(new String(ab)))*/
 
-        val a = storage.getB(GCSItem("os-valdemargr", "test"))
+        import fs2.text._
 
-        val ab: storage.UnfinishedBatch = a
+        val string: fs2.Stream[IO, Byte] = fs2.Stream("a", "b", "c")
+          .evalMap(c => IO.pure(c))
+          .repeatN(256 * 1024 * 2)
+          .through(utf8Encode)
 
         storage
-          .batched(IO.pure(ab))
-          .map(ab => println(new String(ab)))
+          .uploadChunked(GCSItem("os-valdemargr", "big-guy6"), string, 1)
       }.as(ExitCode.Success)
   }
 }
