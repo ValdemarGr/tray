@@ -19,7 +19,9 @@ lazy val gcs = (project in file("gcs"))
       http4sCore,
       http4sDsl,
       http4sClient,
-      googleCreds
+      googleCreds,
+      gcCore,
+      gcsStorage
     )
   )
 
@@ -40,7 +42,9 @@ lazy val root = (project in file("root"))
       http4sDsl,
       http4sClient,
       scalaTest,
-      googleCreds
+      googleCreds,
+      gcCore,
+      gcsStorage
     )
   )
   .dependsOn(gcs)

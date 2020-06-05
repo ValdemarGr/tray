@@ -17,4 +17,7 @@ object Dependencies {
   lazy val scalaTestScalaCheckIntegration = "org.scalatestplus" %% "scalatestplus-scalacheck" % "3.1.0.0-RC2" % Test
 
   lazy val googleCreds = "com.google.auth" % "google-auth-library-oauth2-http" % "0.20.0"
+
+  lazy val gcCore = "com.google.cloud" % "google-cloud-core" % "1.93.1"
+  lazy val gcsStorage = "com.google.cloud" % "google-cloud-storage" % "1.102.0"
 }

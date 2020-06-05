@@ -7,6 +7,7 @@ import org.asynchttpclient.DefaultAsyncHttpClientConfig
 import org.http4s._
 import org.http4s.client.asynchttpclient.AsyncHttpClient
 import org.http4s.client.Client
+import org.http4s.client.middleware.GZip
 import org.http4s.headers._
 import org.http4s.util.threads.threadFactory
 import tray.GCSItem
@@ -22,7 +23,7 @@ class GCSStorage[F[_]: Timer: ConcurrentEffect]
     `Content-Range`(org.http4s.headers.Range.SubRange(start, end), max)
 
   private def authedRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*)
-                                 (handler: Response[F] => F[R]): F[R] = client.fetch{
+                                 (handler: Response[F] => F[R]): F[R] = GZip()(client).fetch{
     F.map(tokenDispenser.getToken){ token =>
       val creds: Credentials.Token = Credentials.Token(AuthScheme.Bearer, token.getTokenValue)
 
