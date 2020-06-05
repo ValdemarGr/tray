@@ -17,6 +17,8 @@ object StorageEndpoints {
 
     def get(gcsItem: GCSItem): (Uri, Method) = (objectBaseUrl(gcsItem.bucket) / gcsItem.path) +? ("alt", "media")  -> Method.GET
     def initiateResumableUpload(gcsItem: GCSItem): (Uri, Method) = objectUploadBaseUrl(gcsItem.bucket) +? ("uploadType", "resumable") +? ("name", gcsItem.path) -> Method.POST
+    def put(gcsItem: GCSItem): (Uri, Method) = objectUploadBaseUrl(gcsItem.bucket) +? ("uploadType", "media") +? ("name", gcsItem.path) -> Method.POST
+    def compose(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem.bucket) / gcsItem.path / "compose" -> Method.POST
     val resumableUploadChunk: Method = Method.PUT
   }
 }

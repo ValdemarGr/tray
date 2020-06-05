@@ -3,16 +3,18 @@ package tray.api
 import cats.Monad
 import cats.effect.{ConcurrentEffect, Resource, Sync, Timer}
 import fs2.{Chunk, Pure}
+import org.asynchttpclient.DefaultAsyncHttpClientConfig
 import org.http4s._
-import org.http4s.client.Client
 import org.http4s.client.asynchttpclient.AsyncHttpClient
+import org.http4s.client.Client
 import org.http4s.headers._
+import org.http4s.util.threads.threadFactory
 import tray.GCSItem
 import tray.auth.TokenDispenser
 import tray.underlying.StorageEndpoints
 
 // fs2 stream compiler is defined for cats.effect.Sync
-class GCSStorage[F[_]: Timer]
+class GCSStorage[F[_]: Timer: ConcurrentEffect]
   (client: Client[F], tokenDispenser: TokenDispenser[F])(implicit F: Monad[F], S: Sync[F]) {
   import StorageEndpoints._
 
@@ -29,21 +31,12 @@ class GCSStorage[F[_]: Timer]
         Accept(MediaType.application.json): Header
       ) ++ extraHeaders
 
-      println(Request[F](
-        method = m,
-        uri = uri,
-        httpVersion = HttpVersion.`HTTP/1.1`,
-        headers = Headers.of(hs: _*),
-        body = b
-      ))
-
       Request[F](
         method = m,
         uri = uri,
         httpVersion = HttpVersion.`HTTP/1.1`,
         headers = Headers.of(hs: _*),
-        body = b
-      )
+      ).withEntity(b)
     }
   }(handler)
 
@@ -57,11 +50,39 @@ class GCSStorage[F[_]: Timer]
   def getObject(item: GCSItem): F[Array[Byte]] =
     Objects.get(item) match { case (uri, m) => authedRequest(m, uri, EmptyBody)(unwrapToAB) }
 
+  def putObject(item: GCSItem, data: fs2.Stream[F, Byte]): F[Unit] =
+    Objects.put(item) match { case (uri, m) => authedRequest(m, uri, data)(_ => S.unit) }
+
+  def putParallel(item: GCSItem, data: fs2.Stream[F, Byte], concurrent: Int, chunkFactor: Int, prefix: String): F[Unit] = {
+    val rechunked: fs2.Stream[F, (Chunk[Byte], Long)] = data.chunkN(baseChunkSize * chunkFactor).zipWithIndex
+    import cats.implicits._
+
+    val uploaded: fs2.Stream[F, String] = rechunked.mapAsyncUnordered(concurrent) { case (c, i) =>
+      val itemName = prefix + "-" + i.toString
+      println(itemName)
+      putObject(GCSItem(item.bucket, itemName), fs2.Stream.chunk(c)).as(itemName)
+    }
+
+    val formattedSources: F[String] = uploaded
+      .compile
+      .toList
+      .map(_.map(name => s"""{"name":"${name}"}""").mkString(","))
+
+    formattedSources.flatMap{ items =>
+      import fs2.text._
+      val s = s"""{"sourceObjects":[${items}],"destination":{"contentType":"application/json"}}"""
+
+      val (uri, m) = Objects.compose(item)
+
+      authedRequest(m, uri, fs2.Stream(s).through(utf8Encode), `Content-Type`(MediaType.application.json))(_ => S.unit)
+    }
+  }
+
   private val baseChunkSize = 256 * 1024
 
-  trait Offset
-  case object Done extends Offset
-  case class NotDone(offset: Long) extends Offset
+  private trait Offset
+  private case object Done extends Offset
+  private case class NotDone(offset: Long) extends Offset
 
   private def doExpBackoffChunkedRequest(m: Method, uri: Uri, bytes: fs2.Chunk[Byte], h: Header): F[Offset] = {
     val b: fs2.Stream[Pure, Byte] = fs2.Stream.chunk(bytes)
@@ -70,8 +91,7 @@ class GCSStorage[F[_]: Timer]
 
     // Do backoff
     fs2.Stream.retry(
-      fo = authedRequest(m, uri, b, h, `Content-Length`.unsafeFromLong(bytes.size.toLong)) { r =>
-        println(r)
+      fo = authedRequest(m, uri, b, h) { r =>
         (r.status, r.headers.get(org.http4s.headers.Range).flatMap(x => x.ranges.head.second)) match {
           case (status, _) if status.code < 300 =>
             F.pure[Offset](Done)
@@ -91,7 +111,7 @@ class GCSStorage[F[_]: Timer]
       .lastOrError
   }
 
-  def uploadChunked(item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int): F[Unit] = {
+  def putObjectChunked(item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int): F[Unit] = {
     val rechunked: fs2.Stream[F, Chunk[Byte]] = data.chunkN(baseChunkSize * chunkFactor)
 
     val (initialUri, initialM) = Objects.initiateResumableUpload(item)
@@ -100,8 +120,6 @@ class GCSStorage[F[_]: Timer]
       // Location header has the new uri
       val h: Option[Location] = resp.headers.get(Location)
 
-      println(resp)
-
       h match {
         case None => S.raiseError(new Exception(s"failed to find location header, got ${resp.status.toString()}"))
         case Some(loc) => {
@@ -109,7 +127,7 @@ class GCSStorage[F[_]: Timer]
           val m: Method = Objects.resumableUploadChunk
 
           val firsts: fs2.Stream[F, Chunk[Byte]] = rechunked
-            .drop(1)
+            .dropLast
 
           val completedFirsts: fs2.Stream[F, Offset] = firsts
             .fold(F.pure[Offset](NotDone(0.toLong))){ case (prevOffsetF, bytes) =>
@@ -126,8 +144,7 @@ class GCSStorage[F[_]: Timer]
             }.evalMap(x => x)
 
           val combined: fs2.Stream[F, Offset] = completedFirsts
-            .last
-            .collect{ case Some(x) => x }
+            .lastOr(NotDone(0)) // If there is only one chunk
             .flatMap{
               case Done => fs2.Stream.empty
               case NotDone(offset) =>
@@ -153,7 +170,15 @@ class GCSStorage[F[_]: Timer]
 
 object GCSStorage {
   def apply[F[_]: ConcurrentEffect: Timer](td: TokenDispenser[F]): Resource[F, GCSStorage[F]] =
-    AsyncHttpClient.resource[F](AsyncHttpClient.defaultConfig).map(c => new GCSStorage[F](c, td))
+    AsyncHttpClient.resource[F](new DefaultAsyncHttpClientConfig.Builder()
+      .setMaxConnectionsPerHost(200)
+      .setMaxConnections(400)
+      .setThreadFactory(threadFactory(name = { i =>
+        s"http4s-async-http-client-worker-${i.toString}"
+      }))
+      .setRequestTimeout(50000000)
+      .setReadTimeout(50000000)
+      .build()).map(c => new GCSStorage[F](c, td))
 
   def apply[F[_]: ConcurrentEffect: Timer](client: Client[F], td: TokenDispenser[F]): GCSStorage[F] =
     new GCSStorage(client, td)
