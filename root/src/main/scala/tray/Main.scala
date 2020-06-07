@@ -3,26 +3,29 @@ package tray
 import java.nio.file.Paths
 
 import cats.effect.{Blocker, ExitCode, IO, IOApp, Resource}
+import com.google.auth.oauth2.AccessToken
 import com.google.cloud.storage.{BlobId, BlobInfo, StorageOptions}
+import org.http4s.client.Client
 import tray.api.GCSStorage
 import tray.auth.TokenDispenser
 
 object Main extends IOApp {
 
-  val td = TokenDispenser[IO]
+  val td: IO[TokenDispenser[IO]] = TokenDispenser[IO]
+
+  val token: IO[AccessToken] = td.flatMap(_.getToken)
+
+  val td: TokenDispenser[IO] = ???
 
   val storage: Resource[IO, GCSStorage[IO]] = GCSStorage[IO](td.unsafeRunSync())
+
+  val client: Client[IO] = ???
+  val storage = GCSStorage[IO](td)
 
   override def run(args: List[String]): IO[ExitCode] = {
     storage
       .use { storage =>
         val fileData: fs2.Stream[IO, Byte] = fs2.io.file.readAll[IO](Paths.get("/tmp/myfile"), Blocker.liftExecutionContext(scala.concurrent.ExecutionContext.global), 50000)
-
-        /*storage
-          .getObject(GCSItem("os-valdemargr", "tmp.py"))
-          .map(ab => println(new String(ab)))
-
-*/
 
         val s = StorageOptions.getDefaultInstance.getService
 
