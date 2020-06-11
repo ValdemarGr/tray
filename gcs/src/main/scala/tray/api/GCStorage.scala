@@ -34,8 +34,6 @@ class GCStorage[F[_]: Timer: ConcurrentEffect]
         Accept(MediaType.application.json): Header
       ) ++ extraHeaders
 
-      println(extraHeaders)
-
       Request[F](
         method = m,
         uri = uri,

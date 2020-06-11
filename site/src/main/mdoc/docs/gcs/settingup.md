@@ -41,8 +41,11 @@ val client: Client[IO] = ???
 val storage = GCStorage[IO](client, td)
 ```
 
-### Uploading
-Uploading can be done in a different number of ways.
-* A single http request with the entire payload, which can fail.
-* A chunked http request which is resumable and safe, but slower.
-* A parallel upload which uploads individual chunks to temporary objects, then "composes" using Google Cloud's compose function, which should only be used for larger files.
+## Queries
+Generally queries are detached from the storage interface.
+The `GCStorage` class is simply a wrapper for the dependencies such as the http client, the authenticated request code and token dispenser.
+The query objects are organized such that the object name is the same as the sections in [the google api](https://cloud.google.com/storage/docs/json_api/v1#Objects).
+
+All objects are refereed to by a case class `GCSItem(bucket: String, path: String)`.
+
+Usually you would want the `GCStorage` to be passed implicitly as it is an implicit parameter of almost all queries.

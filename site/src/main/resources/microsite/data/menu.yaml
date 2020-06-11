@@ -11,3 +11,5 @@ options:
     nested_options:
       - title: Setting up
         url: docs/gcs/settingup.html
+      - title: Uploading
+        url: docs/gcs/uploading.html

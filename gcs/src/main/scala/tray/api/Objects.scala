@@ -210,15 +210,15 @@ object Objects {
    *
    * @param data The data-stream to upload.
    *
-   * @param concurrent The number of threads used to perform the upload.
+   * @param parallelism The number of threads used to perform the upload.
    *
    * @param chunkFactor The "factor" of size of chunks, Google cloud only allows multiples of 256kb chunks, so this integer will determine the payload size, eg 256kb * chunkFactor.
    *
    * @param prefix The prefix is used to name the temporary files created, if the prefix is "tmp" then the elements will be named "tmp-1", "tmp-2"...
    */
-  def putParallel[F[_]: Concurrent: Sync](item: GCSItem, data: fs2.Stream[F, Byte], concurrent: Int, chunkFactor: Int, prefix: String)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+  def putParallel[F[_]: Concurrent: Sync](item: GCSItem, data: fs2.Stream[F, Byte], parallelism: Int, chunkFactor: Int, prefix: String)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val rechunked: fs2.Stream[F, (Chunk[Byte], Long)] = data.chunkN(G.baseChunkSize * chunkFactor).zipWithIndex
-    val uploaded: fs2.Stream[F, String] = rechunked.mapAsyncUnordered(concurrent) { case (c, i) =>
+    val uploaded: fs2.Stream[F, String] = rechunked.mapAsyncUnordered(parallelism) { case (c, i) =>
       val itemName = prefix + "-" + i.toString
       val asChunks: fs2.Stream[F, Byte] = fs2.Stream
         .chunk(c).lift[F]
