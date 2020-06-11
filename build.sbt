@@ -21,9 +21,13 @@ lazy val gcs = (project in file("gcs"))
       http4sClient,
       googleCreds,
       gcCore,
-      gcsStorage
+      gcsStorage,
+      circeCore,
+      circeGeneric,
+      circeParser
     )
   )
+
 
 
 lazy val root = (project in file("root"))
@@ -44,7 +48,10 @@ lazy val root = (project in file("root"))
       scalaTest,
       googleCreds,
       gcCore,
-      gcsStorage
+      gcsStorage,
+      circeCore,
+      circeGeneric,
+      circeParser
     )
   )
   .dependsOn(gcs)

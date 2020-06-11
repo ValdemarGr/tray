@@ -33,12 +33,12 @@ The underlying http implementation is based on http4s with [async-http-client](h
 ```scala
 val td: TokenDispenser[IO] = ???
 
-val storage: Resource[IO, GCSStorage[IO]] = GCSStorage[IO](td)
+val storage: Resource[IO, GCStorage[IO]] = GCStorage[IO](td)
 ```
 Or
 ```scala
 val client: Client[IO] = ???
-val storage = GCSStorage[IO](client, td)
+val storage = GCStorage[IO](client, td)
 ```
 
 ### Uploading
