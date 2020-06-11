@@ -72,8 +72,6 @@ object Objects {
 
         val combined = secondRangeHeader orElse secondContentRangeHeader
 
-        println(r)
-
         (r.status, combined) match {
           case (status, Some(endRange)) if status.code == Status.PartialContent.code =>
             O.construct(AbstractNotDone(endRange + 1), r)
@@ -156,7 +154,6 @@ object Objects {
     }
 
     val streamF: F[fs2.Stream[F, Chunk[Byte]]] = firstRequest.map{ case (o, totalEnd) =>
-      println(totalEnd)
       val withError: fs2.Stream[F, OffsetWithBody] = fs2.Stream
         .iterateEval(o) {
           case failed: FailedAt => S.pure(failed): F[OffsetWithBody]
