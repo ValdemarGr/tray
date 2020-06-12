@@ -67,5 +67,7 @@ lazy val microsite = (project in file("site"))
     micrositeCompilingDocsTool := WithMdoc,
     mdocIn := sourceDirectory.value / "main" / "mdoc",
     micrositeDocumentationUrl := "docs/intro",
-    micrositeHighlightTheme := "atom-one-light"
-  )
+    micrositeHighlightTheme := "atom-one-light",
+    micrositeGithubOwner := "ValdemarGr",
+    //git.remoteRepo := "git@github.com:ValdemarGr/tray.git"
+  )enablePlugins(GhpagesPlugin)

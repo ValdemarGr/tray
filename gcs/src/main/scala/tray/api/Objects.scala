@@ -107,6 +107,7 @@ object Objects {
    * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
    *
    * Getting should not be done in parallel, since it requires the previous result's range header to determine the next offset.
+   * If parallelism is wished for, once should instead create a stream of [0-99, 100-199, 200-299...], then request the objects using either of the two get methods by using something like [[fs2.Stream.parEvalMapUnordered]].
    *
    * @param item The bucket/path to upload to.
    *
@@ -126,7 +127,6 @@ object Objects {
     // This is much simpler than [[putObjectChunked]] since we do not need a finalizing step.
     val (uri, m) = ObjectsEndpoints.get(item)
     val chunkSize: Long = chunkFactor * G.baseChunkSize
-
     val lengthWithFallback: F[Long] = OptionT.fromOption[F](endAt).getOrElseF[Long]{
       val (uriMetadata, mMetadata) = ObjectsEndpoints.getMetadata(item, "size") // Only query size, for performance
 

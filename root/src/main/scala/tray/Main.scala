@@ -17,7 +17,11 @@ object Main extends IOApp {
 
         //storage.putParallel(GCSItem("os-valdemar", "testitem"), fileData, 16, 8, "tmppp").as(ExitCode.Success)
 
-        println(Objects.getObjectChunked(GCSItem("os-valdemar", "myfile"), 10, onFailure = (_ => IO.pure(println("Failure!"))))
+        val range = 5
+
+        fs2.Stream.range(0, 20, range).compile.toList.foreach(x => println(s"${x.toString} - ${(x + range - 1).toString}"))
+
+        println(Objects.getObjectChunked(GCSItem("os-valdemar", "myfile"), chunkFactor=10, onFailure = (_ => IO.pure(println("Failure!"))))
           .compile
           .toList
           .unsafeRunSync()

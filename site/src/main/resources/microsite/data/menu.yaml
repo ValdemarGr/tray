@@ -13,3 +13,5 @@ options:
         url: docs/gcs/settingup.html
       - title: Uploading
         url: docs/gcs/uploading.html
+      - title: Downloading
+        url: docs/gcs/downloading.html
