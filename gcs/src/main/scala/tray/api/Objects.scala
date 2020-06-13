@@ -3,10 +3,12 @@ package tray.api
 import cats.data.OptionT
 import cats.effect.{Concurrent, Sync, Timer}
 import fs2.Chunk
+import io.circe.{Decoder, Json}
 import org.http4s._
 import org.http4s.headers.{Location, `Content-Type`}
 import tray.GCSItem
-import tray.serde.Compose
+import tray.params.ListFilter
+import tray.serde.{Compose, ListingResponse, ObjectMetadata}
 import tray.underlying.StorageEndpoints.ObjectsEndpoints
 
 import scala.util.Try
@@ -121,10 +123,8 @@ object Objects {
    *
    * @return A stream of data. This stream might have a raised error in it (for multiple reasons such as api errors or raising one in onFailure.
    */
-  @SuppressWarnings(Array("org.wartremover.warts.DefaultArguments"))
   def getObjectChunked[F[_]: Timer](item: GCSItem, chunkFactor: Long, onFailure: Long => F[Unit], beginAt: Long = 0, endAt: Option[Long] = None)
                             (implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Chunk[Byte]] = {
-    // This is much simpler than [[putObjectChunked]] since we do not need a finalizing step.
     val (uri, m) = ObjectsEndpoints.get(item)
     val chunkSize: Long = chunkFactor * G.baseChunkSize
     val lengthWithFallback: F[Long] = OptionT.fromOption[F](endAt).getOrElseF[Long]{
@@ -157,7 +157,7 @@ object Objects {
       val withError: fs2.Stream[F, OffsetWithBody] = fs2.Stream
         .iterateEval(o) {
           case failed: FailedAt => S.pure(failed): F[OffsetWithBody]
-          case d: DoneWithBody => S.pure(d): F[OffsetWithBody]
+          case _: DoneWithBody => S.raiseError[OffsetWithBody](new Exception("Did not terminate when done with body")): F[OffsetWithBody]
           case NotDoneWithBody(offset, _) => {
 
             val start = offset
@@ -262,7 +262,6 @@ object Objects {
    *
    * @return An option, if defined contains an indication of a failure and how many bytes were written such that an upload may be resumed.
    */
-  @SuppressWarnings(Array("org.wartremover.warts.DefaultArguments"))
   def putObjectChunked[F[_]: Timer](item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int, beginAt: Long = 0)(implicit G: GCStorage[F], S: Sync[F]): OptionT[F, Long] = {
     val rechunked: fs2.Stream[F, Chunk[Byte]] = data.chunkN(G.baseChunkSize * chunkFactor)
 
@@ -326,5 +325,74 @@ object Objects {
     }
 
     OptionT(o)
+  }
+
+  /**
+   * Does a simple delete that runs in one http call.
+   */
+  def delete[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+    val (uri, method) = ObjectsEndpoints.delete(item)
+    G.authedRequest(method, uri, EmptyBody)(_ => S.unit)
+  }
+
+  /**
+   * Does a GCS copy that runs in one http call.
+   */
+  def copy[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+    val (uri, method) = ObjectsEndpoints.copy(from, to)
+    G.authedRequest(method, uri, EmptyBody)(_ => S.unit)
+  }
+
+  private def listingBodyHandler[F[_], T: Decoder](r: Response[F])(implicit S: Sync[F]): F[ListingResponse[T]] = {
+    import fs2.text._
+    r.body.through(utf8Decode).compile.to(List).flatMap{ l =>
+      import io.circe.parser._
+      decode[ListingResponse[T]](l.mkString) match {
+        case Left(e) => S.raiseError[ListingResponse[T]](e)
+        case Right(s) => S.pure(s)
+      }
+    }
+  }
+
+  /**
+   * A listing variant with no field filters.
+   */
+  def list[F[_]](bucket: String, listingFilter: ListFilter = ListFilter())(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[ObjectMetadata]] =
+    listGeneric[F, ObjectMetadata](bucket, listingFilter)
+
+  /**
+   * A listing function which takes a circe decoder and applies it, this encoder should correspond to fieldFilter.
+   */
+  def listDec[F[_], T: Decoder](bucket: String, listingFilter: ListFilter = ListFilter(), fieldFilter: Seq[String] = Seq.empty)(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[T]] =
+    listGeneric[F, T](bucket, listingFilter, fieldFilter)
+
+  /**
+   * Like the decoder flavor of [[listDec]] but returns a map which can be used to find the desired value.
+   */
+  def listAnon[F[_]](bucket: String, listingFilter: ListFilter = ListFilter(), fieldFilter: Seq[String] = Seq.empty)(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[Map[String, Json]]] =
+    listGeneric[F, Map[String, Json]](bucket, listingFilter, fieldFilter)
+
+  private def listGeneric[F[_], T: Decoder](bucket: String, listingFilter: ListFilter, fieldFilter: Seq[String] = Seq.empty)(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[T]] = {
+    val (initialUri, initialMethod) = ObjectsEndpoints.list(bucket, listingFilter, None, fieldFilter: _*)
+
+    val initial: F[ListingResponse[T]] = G.authedRequest(initialMethod, initialUri, EmptyBody)(r => listingBodyHandler[F, T](r))
+    // Iterate on page
+    val pages: F[fs2.Stream[F, ListingResponse[T]]] = initial.map{ lr =>
+      fs2.Stream
+        .iterateEval(lr) { prev =>
+          prev.nextPageToken match {
+            case Some(nextPage) => {
+              val (nextUri, nextMethod) = ObjectsEndpoints.list(bucket, listingFilter, Some(nextPage), fieldFilter: _*)
+
+              G.authedRequest(nextMethod, nextUri, EmptyBody)(r => listingBodyHandler[F, T](r))
+            }
+            case None => S.raiseError[ListingResponse[T]](new Exception("Did not terminate when there was no next page"))
+          }
+        }
+    }
+
+    fs2.Stream
+      .eval(pages)
+      .flatMap(x => x)
   }
 }

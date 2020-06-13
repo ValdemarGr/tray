@@ -28,8 +28,6 @@ lazy val gcs = (project in file("gcs"))
     )
   )
 
-
-
 lazy val root = (project in file("root"))
   .settings(commonSettings: _*)
   .settings(
@@ -56,17 +54,16 @@ lazy val root = (project in file("root"))
   )
   .dependsOn(gcs)
 
-
 lazy val microsite = (project in file("site"))
   .enablePlugins(MicrositesPlugin)
   .settings(
     scalaVersion in ThisBuild := "2.12.10",
     micrositeName := "Tray",
     micrositeDescription := "A fully asynchronous cats-effect and fs2 cloud object storage layer.",
-    micrositeBaseUrl := "",
+    micrositeBaseUrl := "/tray",
     micrositeCompilingDocsTool := WithMdoc,
     mdocIn := sourceDirectory.value / "main" / "mdoc",
-    micrositeDocumentationUrl := "docs/intro",
+    micrositeDocumentationUrl := "/tray/intro",
     micrositeHighlightTheme := "atom-one-light",
     micrositeGithubOwner := "ValdemarGr",
     git.remoteRepo := "git@github.com:ValdemarGr/tray.git"

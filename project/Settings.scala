@@ -6,6 +6,7 @@ object Settings {
   lazy val commonSettings: Seq[sbt.Def.SettingsDefinition] = Seq(
     wartremoverErrors ++= Warts.unsafe,
     wartremoverErrors -= Wart.Any,
+    wartremoverErrors -= Wart.DefaultArguments,
     AssemblyKeys.assemblyMergeStrategy in AssemblyKeys.assembly := {
       case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
       case PathList("reference.conf") => MergeStrategy.concat
