@@ -36,6 +36,7 @@ case class ObjectMetadata(
 
 object ObjectMetadata {
   implicit lazy val dec: io.circe.Decoder[ObjectMetadata] = io.circe.generic.semiauto.deriveDecoder[ObjectMetadata]
+  implicit lazy val enc: io.circe.Encoder.AsObject[ObjectMetadata] = io.circe.generic.semiauto.deriveEncoder[ObjectMetadata]
 
   case class Owner(
                   entity: String,
@@ -44,6 +45,7 @@ object ObjectMetadata {
 
   object Owner {
     implicit lazy val dec: io.circe.Decoder[Owner] = io.circe.generic.semiauto.deriveDecoder[Owner]
+    implicit lazy val enc: io.circe.Encoder.AsObject[Owner] = io.circe.generic.semiauto.deriveEncoder[Owner]
   }
 
   case class CustomerEncryption(
@@ -53,6 +55,7 @@ object ObjectMetadata {
 
   object CustomerEncryption {
     implicit lazy val dec: io.circe.Decoder[CustomerEncryption] = io.circe.generic.semiauto.deriveDecoder[CustomerEncryption]
+    implicit lazy val enc: io.circe.Encoder.AsObject[CustomerEncryption] = io.circe.generic.semiauto.deriveEncoder[CustomerEncryption]
   }
 
 }

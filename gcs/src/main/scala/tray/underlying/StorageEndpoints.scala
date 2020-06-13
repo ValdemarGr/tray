@@ -42,6 +42,7 @@ object StorageEndpoints {
     }
     def copy(from: GCSItem, to: GCSItem): (Uri, Method) = objectBaseUrl(from) / "copyTo" / objectBucketPath(to) -> Method.POST
     def delete(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) -> Method.DELETE
+    def patch(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) -> Method.PATCH
     def get(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) +? ("alt", "media") -> Method.GET
     def getMetadata(gcsItem: GCSItem, filters: String*): (Uri, Method) = {
       val defaultUri = objectBaseUrl(gcsItem) +? ("alt", "json")

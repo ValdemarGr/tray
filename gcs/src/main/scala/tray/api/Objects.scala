@@ -3,12 +3,12 @@ package tray.api
 import cats.data.OptionT
 import cats.effect.{Concurrent, Sync, Timer}
 import fs2.Chunk
-import io.circe.{Decoder, Json}
+import io.circe.{Decoder, Json, JsonObject}
 import org.http4s._
 import org.http4s.headers.{Location, `Content-Type`}
 import tray.GCSItem
 import tray.params.ListFilter
-import tray.serde.{Compose, ListingResponse, ObjectMetadata}
+import tray.serde.{Compose, ListingResponse, ObjectMetadata, PartialObjectMetadata}
 import tray.underlying.StorageEndpoints.ObjectsEndpoints
 
 import scala.util.Try
@@ -394,5 +394,31 @@ object Objects {
     fs2.Stream
       .eval(pages)
       .flatMap(x => x)
+  }
+
+  /**
+   * Patches the object metadata.
+   */
+  def patchJson[F[_]](item: GCSItem, newMetadata: Json)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+    val (uri, m) = ObjectsEndpoints.patch(item)
+
+    import fs2.text._
+
+    G.authedRequest(m, uri, fs2.Stream(newMetadata.noSpaces).lift[F].through(utf8Encode))(_ => S.unit)
+  }
+
+  /**
+   * Patches the object metadata using a structured parameter.
+   */
+  def patchPartial[F[_]](item: GCSItem, newMetadata: PartialObjectMetadata)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+    import io.circe.syntax._
+
+    val jo: JsonObject = newMetadata
+      .asJsonObject
+      .toMap
+      .filterNot{ case (k, v) => v.isNull}
+      .asJsonObject
+
+    patchJson(item, jo.asJson)
   }
 }
