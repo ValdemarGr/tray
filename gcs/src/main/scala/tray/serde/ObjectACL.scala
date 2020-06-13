@@ -18,6 +18,7 @@ case class ObjectACL(
 
 object ObjectACL {
   implicit lazy val dec: io.circe.Decoder[ObjectACL] = io.circe.generic.semiauto.deriveDecoder[ObjectACL]
+  implicit lazy val enc: io.circe.Encoder.AsObject[ObjectACL] = io.circe.generic.semiauto.deriveEncoder[ObjectACL]
 
   case class ProjectTeam(
                         projectNumber: String,
@@ -26,6 +27,7 @@ object ObjectACL {
 
   object ProjectTeam {
     implicit lazy val dec: io.circe.Decoder[ProjectTeam] = io.circe.generic.semiauto.deriveDecoder[ProjectTeam]
+    implicit lazy val enc: io.circe.Encoder.AsObject[ProjectTeam] = io.circe.generic.semiauto.deriveEncoder[ProjectTeam]
   }
 
 }

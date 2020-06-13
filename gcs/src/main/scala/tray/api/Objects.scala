@@ -8,7 +8,7 @@ import org.http4s._
 import org.http4s.headers.{Location, `Content-Type`}
 import tray.GCSItem
 import tray.params.ListFilter
-import tray.serde.{Compose, ListingResponse, ObjectMetadata, PartialObjectMetadata}
+import tray.serde.{Compose, ListingResponse, ObjectMetadata, PartialObjectMetadata, Rewrite}
 import tray.underlying.StorageEndpoints.ObjectsEndpoints
 
 import scala.util.Try
@@ -357,8 +357,14 @@ object Objects {
   /**
    * A listing variant with no field filters.
    */
-  def list[F[_]](bucket: String, listingFilter: ListFilter = ListFilter())(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[ObjectMetadata]] =
+  def listFull[F[_]](bucket: String, listingFilter: ListFilter = ListFilter())(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[ObjectMetadata]] =
     listGeneric[F, ObjectMetadata](bucket, listingFilter)
+
+  /**
+   * A listing variant with field filters and a partial variant.
+   */
+  def listPartial[F[_]](bucket: String, listingFilter: ListFilter = ListFilter(), fieldFilter: Seq[String] = Seq.empty)(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[PartialObjectMetadata]] =
+    listGeneric[F, PartialObjectMetadata](bucket, listingFilter, fieldFilter)
 
   /**
    * A listing function which takes a circe decoder and applies it, this encoder should correspond to fieldFilter.
@@ -388,7 +394,7 @@ object Objects {
             }
             case None => S.raiseError[ListingResponse[T]](new Exception("Did not terminate when there was no next page"))
           }
-        }
+        }.takeWhile(_.nextPageToken.isDefined)
     }
 
     fs2.Stream
@@ -416,9 +422,60 @@ object Objects {
     val jo: JsonObject = newMetadata
       .asJsonObject
       .toMap
-      .filterNot{ case (k, v) => v.isNull}
+      .filterNot{ case (_, v) => v.isNull}
       .asJsonObject
 
     patchJson(item, jo.asJson)
+  }
+
+  private def rewriteBodyHandler[F[_]](r: Response[F])(implicit S: Sync[F]): F[Rewrite] = {
+    import fs2.text._
+    r.body.through(utf8Decode).compile.to(List).flatMap{ l =>
+      import io.circe.parser._
+      decode[Rewrite](l.mkString) match {
+        case Left(e) => S.raiseError[Rewrite](e)
+        case Right(s) => S.pure(s)
+      }
+    }
+  }
+
+  /**
+   * Rewrites a source object to a destination object, optionally with some new metadata.
+   *
+   * @returns A stream which evaluates all the rewrite steps.
+   */
+  def rewrite[F[_]](source: GCSItem, target: GCSItem, newMetadata: PartialObjectMetadata = PartialObjectMetadata())(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Rewrite] = {
+    import io.circe.syntax._
+
+    val jo: JsonObject = newMetadata
+      .asJsonObject
+      .toMap
+      .filterNot{ case (_, v) => v.isNull}
+      .asJsonObject
+
+    import fs2.text._
+    val metadataStream = fs2.Stream(jo.asJson.noSpaces).lift[F].through(utf8Encode)
+
+    val (uri, m) = ObjectsEndpoints.rewrite(source, target, None)
+
+    val initial: F[Rewrite] = G.authedRequest(m, uri, metadataStream)(r => rewriteBodyHandler(r))
+
+    val its: F[fs2.Stream[F, Rewrite]] = initial.map{ r =>
+      fs2.Stream
+        .iterateEval(r) { prev =>
+          prev.rewriteToken match {
+            case Some(nextToken) => {
+              val (nextUri, nextM) = ObjectsEndpoints.rewrite(source, target, Some(nextToken))
+
+              G.authedRequest(nextM, nextUri, metadataStream)(r => rewriteBodyHandler(r))
+            }
+            case None => S.raiseError[Rewrite](new Exception("Did not terminate on empty rewrite token"))
+          }
+        }.takeWhile(_.rewriteToken.isDefined)
+    }
+
+    fs2.Stream
+      .eval(its)
+      .flatMap(x => x)
   }
 }

@@ -41,6 +41,15 @@ object StorageEndpoints {
       withOptionalFilter  -> Method.GET
     }
     def copy(from: GCSItem, to: GCSItem): (Uri, Method) = objectBaseUrl(from) / "copyTo" / objectBucketPath(to) -> Method.POST
+    def rewrite(from: GCSItem, to: GCSItem, nextToken: Option[String]): (Uri, Method) = {
+      val base = objectBaseUrl(from) / "rewriteTo" / objectBucketPath(to)
+
+      val withToken = nextToken
+        .map(t => base +? ("rewriteToken", t))
+        .getOrElse(base)
+
+      withToken -> Method.POST
+    }
     def delete(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) -> Method.DELETE
     def patch(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) -> Method.PATCH
     def get(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) +? ("alt", "media") -> Method.GET
