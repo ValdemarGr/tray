@@ -18,10 +18,10 @@ object StorageEndpoints {
     private def objectBucketPath(item: GCSItem): Path = (Uri() / prefix / item.bucket / suffix / item.path).path
     private def objectBucketPath(bucket: String): Path = (Uri() / prefix / bucket / suffix).path
 
-    private def objectBaseUrl(item: GCSItem): Uri = base / "storage" / storageVersion / objectBucketPath(item)
-    private def objectBaseUrl(bucket: String): Uri = base / "storage" / storageVersion / objectBucketPath(bucket)
+    private def objectBaseUrl(item: GCSItem): Uri = (base / "storage" / storageVersion) addPath objectBucketPath(item)
+    private def objectBaseUrl(bucket: String): Uri = (base / "storage" / storageVersion) addPath objectBucketPath(bucket)
 
-    private def objectUploadBaseUrl(bucket: String) = base / uri"upload".path / "storage" / storageVersion / prefix / bucket / suffix
+    private def objectUploadBaseUrl(bucket: String) = base / "upload" / "storage" / storageVersion / prefix / bucket / suffix
 
     def list(bucket: String, filter: ListFilter, page: Option[String], fieldFilters: String*): (Uri, Method) = {
       val qps: Map[String, String] = filter.toQP
@@ -40,9 +40,11 @@ object StorageEndpoints {
 
       withOptionalFilter  -> Method.GET
     }
-    def copy(from: GCSItem, to: GCSItem): (Uri, Method) = objectBaseUrl(from) / "copyTo" / objectBucketPath(to) -> Method.POST
+    def watchAll(item: GCSItem): (Uri, Method) = objectBaseUrl(item.copy(path = "watch")) -> Method.PUT
+    def update(item: GCSItem): (Uri, Method) = objectBaseUrl(item) -> Method.PUT
+    def copy(from: GCSItem, to: GCSItem): (Uri, Method) = ((objectBaseUrl(from) / "copyTo") addPath objectBucketPath(to)) -> Method.POST
     def rewrite(from: GCSItem, to: GCSItem, nextToken: Option[String]): (Uri, Method) = {
-      val base = objectBaseUrl(from) / "rewriteTo" / objectBucketPath(to)
+      val base = objectBaseUrl(from) / "rewriteTo" addPath objectBucketPath(to)
 
       val withToken = nextToken
         .map(t => base +? ("rewriteToken", t))

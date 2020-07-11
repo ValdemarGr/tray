@@ -7,8 +7,8 @@ import io.circe.{Decoder, Json, JsonObject}
 import org.http4s._
 import org.http4s.headers.{Location, `Content-Type`}
 import tray.GCSItem
-import tray.params.ListFilter
-import tray.serde.{Compose, ListingResponse, ObjectMetadata, PartialObjectMetadata, Rewrite}
+import tray.params.{ListFilter, WatchAll}
+import tray.serde.{Compose, ListingResponse, ObjectMetadata, PartialObjectMetadata, Rewrite, UpdateMetadata}
 import tray.underlying.StorageEndpoints.ObjectsEndpoints
 
 import scala.util.Try
@@ -477,5 +477,40 @@ object Objects {
     fs2.Stream
       .eval(its)
       .flatMap(x => x)
+  }
+
+  /**
+   * Does a single http update call to the GCS endpoint with the supplied metadata changes.
+   */
+  def update[F[_]](item: GCSItem, updateMetadata: UpdateMetadata)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+    val (uri, m) = ObjectsEndpoints.update(item)
+
+    import io.circe.syntax._
+    import fs2.text._
+
+    val nullRemoved: String = updateMetadata
+      .asJsonObject
+      .toMap
+      .filterNot{ case (_, v) => v.isNull}
+      .asJson
+      .noSpaces
+
+    val encoded = fs2.Stream(nullRemoved).lift[F].through(utf8Encode)
+
+    G.authedRequest(m, uri, encoded)(_ => S.unit)
+  }
+
+  /**
+   *
+   */
+  def watchAll[F[_]](item: GCSItem, watchAll: WatchAll)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+    val (uri, m) = ObjectsEndpoints.update(item)
+
+    import io.circe.syntax._
+    import fs2.text._
+
+    val dataStream = fs2.Stream(watchAll.asJson.noSpaces).lift[F].through(utf8Encode)
+
+    G.authedRequest(m, uri, dataStream)(_ => S.unit)
   }
 }

@@ -13,14 +13,6 @@ object Main extends IOApp {
   override def run(args: List[String]): IO[ExitCode] = {
     storage
       .use { implicit storage =>
-        //val fileData: fs2.Stream[IO, Byte] = fs2.io.file.readAll[IO](Paths.get("/tmp/myfile"), Blocker.liftExecutionContext(scala.concurrent.ExecutionContext.global), 50000)
-
-        //storage.putParallel(GCSItem("os-valdemar", "testitem"), fileData, 16, 8, "tmppp").as(ExitCode.Success)
-
-        val range = 5
-
-        fs2.Stream.range(0, 20, range).compile.toList.foreach(x => println(s"${x.toString} - ${(x + range - 1).toString}"))
-
         println(Objects.getObjectChunked(GCSItem("os-valdemar", "myfile"), chunkFactor=10, onFailure = (_ => IO.pure(println("Failure!"))))
           .compile
           .toList

@@ -1,5 +1,7 @@
 package tray.api
 
+import java.util.UUID
+
 import cats.Monad
 import cats.effect.{ConcurrentEffect, Resource, Timer}
 import org.asynchttpclient.DefaultAsyncHttpClientConfig
@@ -7,8 +9,11 @@ import org.http4s._
 import org.http4s.client.Client
 import org.http4s.client.asynchttpclient.AsyncHttpClient
 import org.http4s.headers._
+import org.http4s.multipart.{Multipart, Part}
 import org.http4s.util.threads.threadFactory
 import tray.auth.TokenDispenser
+
+import scala.collection.immutable
 
 /**
  * The Google Storage interface, note that `Sync[F]` is needed as side-effect suspension is used and the fs2 compiler needs this implicit.
@@ -50,6 +55,43 @@ class GCStorage[F[_]: Timer: ConcurrentEffect]
       .body
       .compile
       .to(Array)
+  }
+
+  def batchedRequest(m: Method, uri: Uri, bodies: fs2.Stream[F, Request[F]], extraHeaders: Header*) = {
+    val boundaryId = UUID.randomUUID().toString
+    val contentIdBase = UUID.randomUUID().toString
+
+    val mixedPartCT: `Content-Type` = `Content-Type`(MediaType.multipartType(MediaType.multipart.mixed.subType, Some(boundaryId)))
+
+    /*
+    Content-Type: application/http
+Content-Transfer-Encoding: binary
+Content-ID: <b29c5de2-0db4-490b-b421-6a51b598bd22+1>
+     */
+    // Bodies must be made to multiparts
+    val formattedBodies = bodies.zipWithIndex.map{ case (b, i) =>
+      val headers: Seq[Header] = Seq(
+        `Content-Type`(MediaType.application.http) : Header,
+        Header("Content-ID", contentIdBase + "-" + i.toString): Header
+      ) ++ `Content-Transfer-Encoding`.parse("binary").toOption.toSeq
+
+      val headersToString: Seq[String] = b.headers.toList.map(_.value)
+      val requestToString = b.method.renderString
+
+      Part(
+        headers = Headers.of(headers: _*),
+        body =
+      )
+    }
+
+    val t: Part[F] = ??? //org.http4s.multipart.Part()
+
+    val mp: Multipart[F] = Multipart(Vector(t))
+
+    Request(
+
+    )
+
   }
 }
 
