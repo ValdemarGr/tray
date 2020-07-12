@@ -1,7 +1,5 @@
 package tray.api
 
-import java.util.UUID
-
 import cats.Monad
 import cats.effect.{ConcurrentEffect, Resource, Timer}
 import org.asynchttpclient.DefaultAsyncHttpClientConfig
@@ -9,11 +7,8 @@ import org.http4s._
 import org.http4s.client.Client
 import org.http4s.client.asynchttpclient.AsyncHttpClient
 import org.http4s.headers._
-import org.http4s.multipart.{Multipart, Part}
 import org.http4s.util.threads.threadFactory
 import tray.auth.TokenDispenser
-
-import scala.collection.immutable
 
 /**
  * The Google Storage interface, note that `Sync[F]` is needed as side-effect suspension is used and the fs2 compiler needs this implicit.
@@ -56,18 +51,18 @@ class GCStorage[F[_]: Timer: ConcurrentEffect]
       .compile
       .to(Array)
   }
+  /*
+    def batchedRequest(m: Method, uri: Uri, bodies: fs2.Stream[F, Request[F]], extraHeaders: Header*) = {
+      val boundaryId = UUID.randomUUID().toString
+      val contentIdBase = UUID.randomUUID().toString
 
-  def batchedRequest(m: Method, uri: Uri, bodies: fs2.Stream[F, Request[F]], extraHeaders: Header*) = {
-    val boundaryId = UUID.randomUUID().toString
-    val contentIdBase = UUID.randomUUID().toString
+      val mixedPartCT: `Content-Type` = `Content-Type`(MediaType.multipartType(MediaType.multipart.mixed.subType, Some(boundaryId)))
 
-    val mixedPartCT: `Content-Type` = `Content-Type`(MediaType.multipartType(MediaType.multipart.mixed.subType, Some(boundaryId)))
 
-    /*
-    Content-Type: application/http
-Content-Transfer-Encoding: binary
-Content-ID: <b29c5de2-0db4-490b-b421-6a51b598bd22+1>
-     */
+      Content-Type: application/http
+  Content-Transfer-Encoding: binary
+  Content-ID: <b29c5de2-0db4-490b-b421-6a51b598bd22+1>
+
     // Bodies must be made to multiparts
     val formattedBodies = bodies.zipWithIndex.map{ case (b, i) =>
       val headers: Seq[Header] = Seq(
@@ -80,7 +75,7 @@ Content-ID: <b29c5de2-0db4-490b-b421-6a51b598bd22+1>
 
       Part(
         headers = Headers.of(headers: _*),
-        body =
+        body = fs2.Stream()
       )
     }
 
@@ -92,7 +87,7 @@ Content-ID: <b29c5de2-0db4-490b-b421-6a51b598bd22+1>
 
     )
 
-  }
+  }*/
 }
 
 object GCStorage {

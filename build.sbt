@@ -11,6 +11,7 @@ lazy val gcs = (project in file("gcs"))
     libraryDependencies ++= Seq(
       catsCore,
       catsEffect,
+      catsFree,
       fs2Core,
       fs2IO,
       scalaTest,
@@ -38,6 +39,7 @@ lazy val root = (project in file("root"))
     libraryDependencies ++= Seq(
       catsCore,
       catsEffect,
+      catsFree,
       fs2Core,
       fs2IO,
       http4sCore,

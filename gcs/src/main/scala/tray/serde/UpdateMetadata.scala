@@ -14,5 +14,4 @@ case class UpdateMetadata(
 
 object UpdateMetadata {
   implicit lazy val enc: io.circe.Encoder.AsObject[UpdateMetadata] = io.circe.generic.semiauto.deriveEncoder[UpdateMetadata]
-
 }
