@@ -1,5 +1,7 @@
 package tray.api
 
+import java.util.UUID
+
 import cats.data.OptionT
 import cats.effect.{Concurrent, Sync, Timer}
 import fs2.Chunk
@@ -9,6 +11,7 @@ import org.http4s.headers.{Location, `Content-Type`}
 import tray.GCSItem
 import tray.params.{ListFilter, WatchAll}
 import tray.serde.{Compose, ListingResponse, ObjectMetadata, PartialObjectMetadata, Rewrite, UpdateMetadata}
+import tray.underlying.Batch
 import tray.underlying.StorageEndpoints.ObjectsEndpoints
 
 import scala.util.Try
@@ -330,17 +333,28 @@ object Objects {
   /**
    * Does a simple delete that runs in one http call.
    */
-  def delete[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+  def delete[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
+    deleteReq(item).flatMap(r => G.authedRequest(r)(_ => S.unit))
+  def deleteBatch[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
+    deleteReq(item).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
+
+  protected[tray] def deleteReq[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
     val (uri, method) = ObjectsEndpoints.delete(item)
-    G.authedRequest(method, uri, EmptyBody)(_ => S.unit)
+    G.makeRequest(method, uri, EmptyBody)
   }
+
 
   /**
    * Does a GCS copy that runs in one http call.
    */
-  def copy[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+  def copy[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
+    copyReq(from, to).flatMap(r => G.authedRequest(r)(_ => S.unit))
+  def copyBatch[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
+    copyReq(from, to).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
+
+  protected[tray] def copyReq[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
     val (uri, method) = ObjectsEndpoints.copy(from, to)
-    G.authedRequest(method, uri, EmptyBody)(_ => S.unit)
+    G.makeRequest(method, uri, EmptyBody)
   }
 
   private def listingBodyHandler[F[_], T: Decoder](r: Response[F])(implicit S: Sync[F]): F[ListingResponse[T]] = {
