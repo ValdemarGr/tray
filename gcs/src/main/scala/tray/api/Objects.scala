@@ -17,87 +17,9 @@ import tray.underlying.StorageEndpoints.ObjectsEndpoints
 import scala.util.Try
 
 object Objects {
+
   import cats.implicits._
-
-  private trait AbstractType
-  private case object AbstractDone extends AbstractType
-  private case class AbstractNotDone(endAt: Long) extends AbstractType
-
-  private trait Offset
-  private trait OffsetWithBody extends Offset
-  private trait OffsetWithoutBody extends Offset
-
-  private case class DoneWithBody(body: Chunk[Byte]) extends OffsetWithBody
-  private case class NotDoneWithBody(offset: Long, body: Chunk[Byte]) extends OffsetWithBody
-
-  private case object Done extends OffsetWithoutBody
-  private case class NotDone(offset: Long) extends OffsetWithoutBody
-
-  private case class FailedAt(offset: Long) extends OffsetWithoutBody with OffsetWithBody
-
-  private trait OffsetConstructor[T <: Offset] {
-    def construct[F[_]](p: AbstractType, r: Response[F])(implicit S: Sync[F]): F[T]
-    def fail[F[_]](fa: FailedAt)(implicit S: Sync[F]): F[T]
-  }
-
-  private implicit object OffsetWithBodyConstructor extends OffsetConstructor[OffsetWithBody] {
-    override def construct[F[_]](p: AbstractType, r: Response[F])(implicit S: Sync[F]): F[OffsetWithBody] = p match {
-      case AbstractDone => r.body.compile.to(Chunk).map(c => DoneWithBody(c))
-      case AbstractNotDone(endAt) => r.body.compile.to(Chunk).map(c => NotDoneWithBody(endAt, c))
-    }
-    override def fail[F[_]](fa: FailedAt)(implicit S: Sync[F]): F[OffsetWithBody] = S.pure(fa)
-  }
-
-  private implicit object OffsetWithoutConstructor extends OffsetConstructor[OffsetWithoutBody] {
-    override def construct[F[_]](p: AbstractType, r: Response[F])(implicit S: Sync[F]): F[OffsetWithoutBody] = p match {
-      case AbstractDone => S.pure(Done)
-      case AbstractNotDone(endAt) => S.pure(NotDone(endAt))
-    }
-    override def fail[F[_]](fa: FailedAt)(implicit S: Sync[F]): F[OffsetWithoutBody] = S.pure(fa)
-  }
-
-  private def doBackoffRangedRequest[R <: Offset, F[_]: Timer](m: Method, uri: Uri, body: EntityBody[F], previousBegin: Long, h: Header*)
-                                                              (implicit G: GCStorage[F], S: Sync[F], O: OffsetConstructor[R]): F[R] = {
-    import scala.concurrent.duration._
-
-    val failF = S.raiseError[R](new Exception("some api error occured"))
-
-    // Do backoff
-    fs2.Stream.retry(
-      fo = G.authedRequest(m, uri, body, h: _*) { r =>
-        val secondRangeHeader: Option[Long] = for {
-          h <- r.headers.get(org.http4s.headers.Range)
-          end <- h.ranges.head.second
-        } yield end
-
-        val secondContentRangeHeader: Option[Long] = for {
-          h <- r.headers.get(org.http4s.headers.`Content-Range`)
-          end <- h.range.second
-        } yield end
-
-        val combined = secondRangeHeader orElse secondContentRangeHeader
-
-        (r.status, combined) match {
-          case (status, Some(endRange)) if status.code == Status.PartialContent.code =>
-            O.construct(AbstractNotDone(endRange + 1), r)
-          case (status, _) if status.responseClass == Status.Successful =>
-            O.construct(AbstractDone, r)
-          case (status, _) if status.code != 308 =>
-            failF
-          case (_, Some(endRange)) =>
-            O.construct(AbstractNotDone(endRange + 1), r)
-          case (_, None) =>
-            failF
-        }
-      },
-      delay = 2.seconds,
-      nextDelay = last => (last.toSeconds^2).seconds,
-      maxAttempts = 4
-    )
-      .compile
-      .lastOrError
-      .handleErrorWith(_ => O.fail(FailedAt(previousBegin)))
-  }
+  import tray.underlying.RequestUtil._
 
   /**
    * Does a "simple" get which downloads the requested object in "one go".
@@ -105,44 +27,43 @@ object Objects {
    * @param item The item to get.
    */
   def getObject[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Array[Byte]] =
-    ObjectsEndpoints.get(item) match { case (uri, m) => G.authedRequest(m, uri, EmptyBody)(G.unwrapToAB) }
+    ObjectsEndpoints.get(item) match {
+      case (uri, m) => G.authedRequest(m, uri, EmptyBody)(G.unwrapToAB)
+    }
 
   /**
-   * Does a resumable upload, effectively chunking the requests without parallel.
+   * Does a resumable upload, effectively chunking the requests. It is not parallel.
    * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
    *
    * Getting should not be done in parallel, since it requires the previous result's range header to determine the next offset.
    * If parallelism is wished for, once should instead create a stream of [0-99, 100-199, 200-299...], then request the objects using either of the two get methods by using something like [[fs2.Stream.parEvalMapUnordered]].
    *
-   * @param item The bucket/path to upload to.
-   *
+   * @param item        The bucket/path to upload to.
    * @param chunkFactor The "factor" of size of chunks such that 256kb sized chunks will be downloaded, so this integer will determine the payload size, eg 256kb * chunkFactor.
-   *
-   * @param onFailure The handler for failures, the parameter is the amount of bytes downloaded (also present in the returned stream). An option is to raise an error in this handler as the effect will eventually propagate up to the compiled and executed stream.
-   *
-   * @param beginAt=0 An optional parameter that specifies at what byte to start, useful for resuming a failed download or request partial data.
-   *
-   * @param endAt=None An optional parameter that specifies at what byte to end, useful for requesting the partial representation of an object, if not specified will get the object metadata first to determine the value.
-   *
+   * @param onFailure   The handler for failures, the parameter is the amount of bytes downloaded (also present in the returned stream). An option is to raise an error in this handler as the effect will eventually propagate up to the compiled and executed stream.
+   * @param beginAt     =0 An optional parameter that specifies at what byte to start, useful for resuming a failed download or request partial data.
+   * @param endAt       =None An optional parameter that specifies at what byte to end, useful for requesting the partial representation of an object, if not specified will get the object metadata first to determine the value.
    * @return A stream of data. This stream might have a raised error in it (for multiple reasons such as api errors or raising one in onFailure.
    */
-  def getObjectChunked[F[_]: Timer](item: GCSItem, chunkFactor: Long, onFailure: Long => F[Unit], beginAt: Long = 0, endAt: Option[Long] = None)
-                            (implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Chunk[Byte]] = {
+  def getObjectChunked[F[_] : Timer](item: GCSItem, chunkFactor: Long, onFailure: Long => F[Unit], beginAt: Long = 0, endAt: Option[Long] = None)
+                                    (implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Chunk[Byte]] = {
     val (uri, m) = ObjectsEndpoints.get(item)
     val chunkSize: Long = chunkFactor * G.baseChunkSize
-    val lengthWithFallback: F[Long] = OptionT.fromOption[F](endAt).getOrElseF[Long]{
-      val (uriMetadata, mMetadata) = ObjectsEndpoints.getMetadata(item, "size") // Only query size, for performance
+    val lengthWithFallback: F[Long] = OptionT.fromOption[F](endAt).getOrElseF[Long] {
+      val (uriMetadata, mMetadata) = ObjectsEndpoints.getMetadata(item, "size") // Only query size
 
       import fs2.text._
 
-      (G.authedRequest(mMetadata, uriMetadata, EmptyBody)(r => r.body.through(utf8Decode).compile.toList.map(_.mkString))).flatMap{ str =>
+      (G.authedRequest(mMetadata, uriMetadata, EmptyBody)(r => r.body.through(utf8Decode).compile.toList.map(_.mkString))).flatMap { str =>
         import io.circe.parser._
 
         val o: Option[Long] = decode[io.circe.JsonObject](str)
           .toOption
           .flatMap(_.toMap.get("size"))
           .flatMap(_.asString)
-          .flatMap(s => Try{ s.toLong }.toOption)
+          .flatMap(s => Try {
+            s.toLong
+          }.toOption)
 
         o match {
           case Some(l) => S.pure(l)
@@ -151,12 +72,12 @@ object Objects {
       }
     }
 
-    val firstRequest: F[(OffsetWithBody, Long)] = lengthWithFallback.flatMap{ end =>
+    val firstRequest: F[(OffsetWithBody, Long)] = lengthWithFallback.flatMap { end =>
       val h = G.rangeHeader(beginAt, math.min(chunkSize, end))
       doBackoffRangedRequest[OffsetWithBody, F](m, uri, EmptyBody, beginAt, h).map(r => r -> end)
     }
 
-    val streamF: F[fs2.Stream[F, Chunk[Byte]]] = firstRequest.map{ case (o, totalEnd) =>
+    val streamF: F[fs2.Stream[F, Chunk[Byte]]] = firstRequest.map { case (o, totalEnd) =>
       val withError: fs2.Stream[F, OffsetWithBody] = fs2.Stream
         .iterateEval(o) {
           case failed: FailedAt => S.pure(failed): F[OffsetWithBody]
@@ -184,11 +105,11 @@ object Objects {
           case _ => false
         }, takeFailure = true)
 
-      withError.evalMap{
-          case FailedAt(fa) => onFailure(fa).as(Option.empty[Chunk[Byte]]): F[Option[Chunk[Byte]]]
-          case DoneWithBody(body) => S.pure(Some(body)): F[Option[Chunk[Byte]]]
-          case NotDoneWithBody(_, body) => S.pure(Some(body)): F[Option[Chunk[Byte]]]
-        }.collect{ case Some(x) => x }
+      withError.evalMap {
+        case FailedAt(fa) => onFailure(fa).as(Option.empty[Chunk[Byte]]): F[Option[Chunk[Byte]]]
+        case DoneWithBody(body) => S.pure(Some(body)): F[Option[Chunk[Byte]]]
+        case NotDoneWithBody(_, body) => S.pure(Some(body)): F[Option[Chunk[Byte]]]
+      }.collect { case Some(x) => x }
     }
 
     fs2.Stream
@@ -200,26 +121,23 @@ object Objects {
    * Does a "simple" put which uploads the requested object in "one go".
    *
    * @param item The bucket/path to upload to.
-   *
    * @param data The data-stream to upload.
    */
   def putObject[F[_]](item: GCSItem, data: fs2.Stream[F, Byte])(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
-    ObjectsEndpoints.put(item) match { case (uri, m) => G.authedRequest(m, uri, data)(_ => S.unit) }
+    ObjectsEndpoints.put(item) match {
+      case (uri, m) => G.authedRequest(m, uri, data)(_ => S.unit)
+    }
 
   /**
    * Does a parallel upload with the chunking factor determining how much of the stream to be consumed before beginning a new request.
    *
-   * @param item The bucket/path to upload to.
-   *
-   * @param data The data-stream to upload.
-   *
+   * @param item        The bucket/path to upload to.
+   * @param data        The data-stream to upload.
    * @param parallelism The number of threads used to perform the upload.
-   *
    * @param chunkFactor The "factor" of size of chunks, Google cloud only allows multiples of 256kb chunks, so this integer will determine the payload size, eg 256kb * chunkFactor.
-   *
-   * @param prefix The prefix is used to name the temporary files created, if the prefix is "tmp" then the elements will be named "tmp-1", "tmp-2"...
+   * @param prefix      The prefix is used to name the temporary files created, if the prefix is "tmp" then the elements will be named "tmp-1", "tmp-2"...
    */
-  def putParallel[F[_]: Concurrent: Sync](item: GCSItem, data: fs2.Stream[F, Byte], parallelism: Int, chunkFactor: Int, prefix: String)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+  def putParallel[F[_] : Concurrent : Sync](item: GCSItem, data: fs2.Stream[F, Byte], parallelism: Int, chunkFactor: Int, prefix: String)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val rechunked: fs2.Stream[F, (Chunk[Byte], Long)] = data.chunkN(G.baseChunkSize * chunkFactor).zipWithIndex
     val uploaded: fs2.Stream[F, String] = rechunked.mapAsyncUnordered(parallelism) { case (c, i) =>
       val itemName = prefix + "-" + i.toString
@@ -235,7 +153,7 @@ object Objects {
       .toList
       .map(_.map(name => tray.serde.Compose.ComposeItem(name)))
 
-    formattedSources.flatMap{ items =>
+    formattedSources.flatMap { items =>
       import fs2.text._
       import io.circe.generic.auto._
       import io.circe.syntax._
@@ -255,17 +173,13 @@ object Objects {
    * Does a resumable upload, effectively chunking the requests without parallel.
    * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
    *
-   * @param item The bucket/path to upload to.
-   *
-   * @param data The data-stream to upload.
-   *
+   * @param item        The bucket/path to upload to.
+   * @param data        The data-stream to upload.
    * @param chunkFactor The "factor" of size of chunks, Google cloud only allows multiples of 256kb chunks, so this integer will determine the payload size, eg 256kb * chunkFactor.
-   *
-   * @param beginAt=0 An optional offset that specifies if an offset should used as the beginning, useful for resuming partially completed uploads. Note that the stream should only contain the remainder of the upload, eg the caller should drop the beginAt bytes from the original data.
-   *
+   * @param beginAt     =0 An optional offset that specifies if an offset should used as the beginning, useful for resuming partially completed uploads. Note that the stream should only contain the remainder of the upload, eg the caller should drop the beginAt bytes from the original data.
    * @return An option, if defined contains an indication of a failure and how many bytes were written such that an upload may be resumed.
    */
-  def putObjectChunked[F[_]: Timer](item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int, beginAt: Long = 0)(implicit G: GCStorage[F], S: Sync[F]): OptionT[F, Long] = {
+  def putObjectChunked[F[_] : Timer](item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int, beginAt: Long = 0)(implicit G: GCStorage[F], S: Sync[F]): OptionT[F, Long] = {
     val rechunked: fs2.Stream[F, Chunk[Byte]] = data.chunkN(G.baseChunkSize * chunkFactor)
 
     val (initialUri, initialM) = ObjectsEndpoints.initiateResumableUpload(item)
@@ -284,8 +198,8 @@ object Objects {
             .dropLast
 
           val completedFirsts: fs2.Stream[F, Offset] = firsts
-            .fold(S.pure[OffsetWithoutBody](NotDone(beginAt))){ case (prevOffsetF, bytes) =>
-              prevOffsetF.flatMap{
+            .fold(S.pure[OffsetWithoutBody](NotDone(beginAt))) { case (prevOffsetF, bytes) =>
+              prevOffsetF.flatMap {
                 case Done => S.raiseError[OffsetWithoutBody](new Exception("got done when there was still work"))
                 case failed: FailedAt => S.pure(failed)
                 case NotDone(offset) =>
@@ -294,19 +208,18 @@ object Objects {
 
                   val h = G.contentRangeHeader(start, end, None)
                   doBackoffRangedRequest[OffsetWithoutBody, F](m, uri, fs2.Stream.chunk(bytes), start, h)
-
               }
             }.evalMap(x => x)
 
           val combined: fs2.Stream[F, OffsetWithoutBody] = completedFirsts
             .lastOr(NotDone(0)) // If there is only one chunk
-            .flatMap{
+            .flatMap {
               case failed: FailedAt => fs2.Stream.eval(S.pure(failed))
               case Done => fs2.Stream.empty
               case NotDone(offset) =>
                 rechunked
                   .last
-                  .collect{ case Some(x) => x }
+                  .collect { case Some(x) => x }
                   .evalMap { bytes =>
                     val start = offset
                     val end = bytes.size.toLong + offset - 1
@@ -318,7 +231,7 @@ object Objects {
             }
 
           combined
-            .collectFirst{ case FailedAt(x) => x }
+            .collectFirst { case FailedAt(x) => x }
             .compile
             .last
         }
@@ -335,6 +248,7 @@ object Objects {
    */
   def delete[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
     deleteReq(item).flatMap(r => G.authedRequest(r)(_ => S.unit))
+
   def deleteBatch[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
     deleteReq(item).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
 
@@ -349,6 +263,7 @@ object Objects {
    */
   def copy[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
     copyReq(from, to).flatMap(r => G.authedRequest(r)(_ => S.unit))
+
   def copyBatch[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
     copyReq(from, to).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
 
@@ -359,7 +274,7 @@ object Objects {
 
   private def listingBodyHandler[F[_], T: Decoder](r: Response[F])(implicit S: Sync[F]): F[ListingResponse[T]] = {
     import fs2.text._
-    r.body.through(utf8Decode).compile.to(List).flatMap{ l =>
+    r.body.through(utf8Decode).compile.to(List).flatMap { l =>
       import io.circe.parser._
       decode[ListingResponse[T]](l.mkString) match {
         case Left(e) => S.raiseError[ListingResponse[T]](e)
@@ -396,8 +311,8 @@ object Objects {
     val (initialUri, initialMethod) = ObjectsEndpoints.list(bucket, listingFilter, None, fieldFilter: _*)
 
     val initial: F[ListingResponse[T]] = G.authedRequest(initialMethod, initialUri, EmptyBody)(r => listingBodyHandler[F, T](r))
-    // Iterate on page
-    val pages: F[fs2.Stream[F, ListingResponse[T]]] = initial.map{ lr =>
+    // Map over page
+    val pages: F[fs2.Stream[F, ListingResponse[T]]] = initial.map { lr =>
       fs2.Stream
         .iterateEval(lr) { prev =>
           prev.nextPageToken match {
@@ -436,7 +351,7 @@ object Objects {
     val jo: JsonObject = newMetadata
       .asJsonObject
       .toMap
-      .filterNot{ case (_, v) => v.isNull}
+      .filterNot { case (_, v) => v.isNull }
       .asJsonObject
 
     patchJson(item, jo.asJson)
@@ -444,7 +359,7 @@ object Objects {
 
   private def rewriteBodyHandler[F[_]](r: Response[F])(implicit S: Sync[F]): F[Rewrite] = {
     import fs2.text._
-    r.body.through(utf8Decode).compile.to(List).flatMap{ l =>
+    r.body.through(utf8Decode).compile.to(List).flatMap { l =>
       import io.circe.parser._
       decode[Rewrite](l.mkString) match {
         case Left(e) => S.raiseError[Rewrite](e)
@@ -464,7 +379,7 @@ object Objects {
     val jo: JsonObject = newMetadata
       .asJsonObject
       .toMap
-      .filterNot{ case (_, v) => v.isNull}
+      .filterNot { case (_, v) => v.isNull }
       .asJsonObject
 
     import fs2.text._
@@ -474,7 +389,7 @@ object Objects {
 
     val initial: F[Rewrite] = G.authedRequest(m, uri, metadataStream)(r => rewriteBodyHandler(r))
 
-    val its: F[fs2.Stream[F, Rewrite]] = initial.map{ r =>
+    val its: F[fs2.Stream[F, Rewrite]] = initial.map { r =>
       fs2.Stream
         .iterateEval(r) { prev =>
           prev.rewriteToken match {
@@ -505,7 +420,7 @@ object Objects {
     val nullRemoved: String = updateMetadata
       .asJsonObject
       .toMap
-      .filterNot{ case (_, v) => v.isNull}
+      .filterNot { case (_, v) => v.isNull }
       .asJson
       .noSpaces
 

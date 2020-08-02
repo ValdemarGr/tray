@@ -17,15 +17,15 @@ import tray.underlying.Batch
 class GCStorage[F[_]: Timer: ConcurrentEffect]
   (client: Client[F], tokenDispenser: TokenDispenser[F])(implicit F: Monad[F]) {
 
-  protected[api] val baseChunkSize = 256 * 1024
+  protected[tray] val baseChunkSize = 256 * 1024
 
-  protected[api] def contentRangeHeader(start: Long, end: Long, max: Option[Long]) =
+  protected[tray] def contentRangeHeader(start: Long, end: Long, max: Option[Long]) =
     `Content-Range`(org.http4s.headers.Range.SubRange(start, end), max)
 
-  protected[api] def rangeHeader(start: Long, end: Long) =
+  protected[tray] def rangeHeader(start: Long, end: Long) =
     Range(org.http4s.headers.Range.SubRange(start, end))
 
-  protected[api] def makeRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*): F[Request[F]] =
+  protected[tray] def makeRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*): F[Request[F]] =
     F.map(tokenDispenser.getToken){ token =>
       val creds: Credentials.Token = Credentials.Token(AuthScheme.Bearer, token.getTokenValue)
 
@@ -42,12 +42,12 @@ class GCStorage[F[_]: Timer: ConcurrentEffect]
       ).withEntity(b)
     }
 
-  protected[api] def authedRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*)
+  protected[tray] def authedRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*)
                                      (handler: Response[F] => F[R]): F[R] = client.fetch(makeRequest(m, uri, b, extraHeaders: _*))(handler)
-  protected[api] def authedRequest[R](r: Request[F])
+  protected[tray] def authedRequest[R](r: Request[F])
                                      (handler: Response[F] => F[R]): F[R] = client.fetch(r)(handler)
 
-  protected[api] def unwrapToAB(r: Response[F]): F[Array[Byte]] = {
+  protected[tray] def unwrapToAB(r: Response[F]): F[Array[Byte]] = {
     r
       .body
       .compile
