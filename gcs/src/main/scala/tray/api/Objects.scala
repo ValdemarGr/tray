@@ -7,7 +7,7 @@ import cats.effect.{Concurrent, Sync, Timer}
 import fs2.Chunk
 import io.circe.{Decoder, Json, JsonObject}
 import org.http4s._
-import org.http4s.headers.{Location, `Content-Type`}
+import org.http4s.headers.{`Content-Type`, Location}
 import tray.GCSItem
 import tray.params.{ListFilter, WatchAll}
 import tray.serde._
@@ -80,18 +80,15 @@ object Objects {
             o match {
               case Some(l) => S.pure(l)
               case None =>
-                S.raiseError[Long](
-                  new Exception(s"failed to parse response data ${str}")
-                )
+                S.raiseError[Long](new Exception(s"failed to parse response data ${str}"))
             }
           }
       }
 
-    val firstRequest: F[(OffsetWithBody, Long)] = lengthWithFallback.flatMap {
-      end =>
-        val h = G.rangeHeader(beginAt, math.min(chunkSize, end))
-        doBackoffRangedRequest[OffsetWithBody, F](m, uri, EmptyBody, beginAt, h)
-          .map(r => r -> end)
+    val firstRequest: F[(OffsetWithBody, Long)] = lengthWithFallback.flatMap { end =>
+      val h = G.rangeHeader(beginAt, math.min(chunkSize, end))
+      doBackoffRangedRequest[OffsetWithBody, F](m, uri, EmptyBody, beginAt, h)
+        .map(r => r -> end)
     }
 
     val streamF: F[fs2.Stream[F, Chunk[Byte]]] = firstRequest.map {
@@ -100,22 +97,14 @@ object Objects {
           .iterateEval(o) {
             case failed: FailedAt => S.pure(failed): F[OffsetWithBody]
             case _: DoneWithBody =>
-              S.raiseError[OffsetWithBody](
-                new Exception("Did not terminate when done with body")
-              ): F[OffsetWithBody]
+              S.raiseError[OffsetWithBody](new Exception("Did not terminate when done with body")): F[OffsetWithBody]
             case NotDoneWithBody(offset, _) => {
 
               val start = offset
               val end = math.min(offset + chunkSize, totalEnd - 1)
 
               val h = G.rangeHeader(start, end)
-              val effect = doBackoffRangedRequest[OffsetWithBody, F](
-                m,
-                uri,
-                EmptyBody,
-                start,
-                h
-              ): F[OffsetWithBody]
+              val effect = doBackoffRangedRequest[OffsetWithBody, F](m, uri, EmptyBody, start, h): F[OffsetWithBody]
 
               if (end == totalEnd - 1) {
                 effect.map {
@@ -135,9 +124,7 @@ object Objects {
         withError
           .evalMap {
             case FailedAt(fa) =>
-              onFailure(fa).as(Option.empty[Chunk[Byte]]): F[
-                Option[Chunk[Byte]]
-              ]
+              onFailure(fa).as(Option.empty[Chunk[Byte]]): F[Option[Chunk[Byte]]]
             case DoneWithBody(body) =>
               S.pure(Some(body)): F[Option[Chunk[Byte]]]
             case NotDoneWithBody(_, body) =>
@@ -157,10 +144,7 @@ object Objects {
     * @param item The bucket/path to upload to.
     * @param data The data-stream to upload.
     */
-  def putObject[F[_]](
-    item: GCSItem,
-    data: fs2.Stream[F, Byte]
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
+  def putObject[F[_]](item: GCSItem, data: fs2.Stream[F, Byte])(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
     ObjectsEndpoints.put(item) match {
       case (uri, m) => G.authedRequest(m, uri, data)(_ => S.unit)
     }
@@ -203,19 +187,14 @@ object Objects {
       import io.circe.generic.auto._
       import io.circe.syntax._
 
-      val s = Compose(
-        sourceObjects = items,
-        destination = ComposeDestination(contentType = "application/json")
-      ).asJson.noSpaces
+      val s =
+        Compose(sourceObjects = items, destination = ComposeDestination(contentType = "application/json")).asJson.noSpaces
 
       val (uri, m) = ObjectsEndpoints.compose(item)
 
-      G.authedRequest(
-        m,
-        uri,
-        fs2.Stream(s).through(utf8Encode),
-        `Content-Type`(MediaType.application.json)
-      )(_ => S.unit)
+      G.authedRequest(m, uri, fs2.Stream(s).through(utf8Encode), `Content-Type`(MediaType.application.json))(
+        _ => S.unit
+      )
     }
   }
 
@@ -229,12 +208,10 @@ object Objects {
     * @param beginAt     =0 An optional offset that specifies if an offset should used as the beginning, useful for resuming partially completed uploads. Note that the stream should only contain the remainder of the upload, eg the caller should drop the beginAt bytes from the original data.
     * @return An option, if defined contains an indication of a failure and how many bytes were written such that an upload may be resumed.
     */
-  def putObjectChunked[F[_]: Timer](
-    item: GCSItem,
-    data: fs2.Stream[F, Byte],
-    chunkFactor: Int,
-    beginAt: Long = 0
-  )(implicit G: GCStorage[F], S: Sync[F]): OptionT[F, Long] = {
+  def putObjectChunked[F[_]: Timer](item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int, beginAt: Long = 0)(
+    implicit G: GCStorage[F],
+    S: Sync[F]
+  ): OptionT[F, Long] = {
     val rechunked: fs2.Stream[F, Chunk[Byte]] =
       data.chunkN(G.baseChunkSize * chunkFactor)
 
@@ -246,11 +223,7 @@ object Objects {
 
       val done = h match {
         case None =>
-          S.raiseError[Option[Long]](
-            new Exception(
-              s"failed to find location header, got ${resp.status.toString()}"
-            )
-          )
+          S.raiseError[Option[Long]](new Exception(s"failed to find location header, got ${resp.status.toString()}"))
         case Some(loc) => {
           val uri = loc.uri
           val m: Method = ObjectsEndpoints.resumableUploadChunk
@@ -262,22 +235,14 @@ object Objects {
               case (prevOffsetF, bytes) =>
                 prevOffsetF.flatMap {
                   case Done =>
-                    S.raiseError[OffsetWithoutBody](
-                      new Exception("got done when there was still work")
-                    )
+                    S.raiseError[OffsetWithoutBody](new Exception("got done when there was still work"))
                   case failed: FailedAt => S.pure(failed)
                   case NotDone(offset) =>
                     val start = offset
                     val end = bytes.size.toLong + offset - 1
 
                     val h = G.contentRangeHeader(start, end, None)
-                    doBackoffRangedRequest[OffsetWithoutBody, F](
-                      m,
-                      uri,
-                      fs2.Stream.chunk(bytes),
-                      start,
-                      h
-                    )
+                    doBackoffRangedRequest[OffsetWithoutBody, F](m, uri, fs2.Stream.chunk(bytes), start, h)
                 }
             }
             .evalMap(x => x)
@@ -296,13 +261,7 @@ object Objects {
                     val length = Some(end + 1)
 
                     val h = G.contentRangeHeader(start, end, length)
-                    doBackoffRangedRequest[OffsetWithoutBody, F](
-                      m,
-                      uri,
-                      fs2.Stream.chunk(bytes),
-                      start,
-                      h
-                    )
+                    doBackoffRangedRequest[OffsetWithoutBody, F](m, uri, fs2.Stream.chunk(bytes), start, h)
                   }
             }
 
@@ -322,19 +281,13 @@ object Objects {
   /**
     * Does a simple delete that runs in one http call.
     */
-  def delete[F[_]](item: GCSItem)(implicit G: GCStorage[F],
-                                  S: Sync[F]): F[Unit] =
+  def delete[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
     deleteReq(item).flatMap(r => G.authedRequest(r)(_ => S.unit))
 
-  def deleteBatch[F[_]](item: GCSItem)(implicit G: GCStorage[F],
-                                       S: Sync[F]): F[Batch[Unit, F]] =
-    deleteReq(item).map(
-      r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR)
-    )
+  def deleteBatch[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
+    deleteReq(item).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
 
-  protected[tray] def deleteReq[F[_]](
-    item: GCSItem
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
+  protected[tray] def deleteReq[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
     val (uri, method) = ObjectsEndpoints.delete(item)
     G.makeRequest(method, uri, EmptyBody)
   }
@@ -342,35 +295,24 @@ object Objects {
   /**
     * Does a GCS copy that runs in one http call.
     */
-  def copy[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F],
-                                             S: Sync[F]): F[Unit] =
+  def copy[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
     copyReq(from, to).flatMap(r => G.authedRequest(r)(_ => S.unit))
 
-  def copyBatch[F[_]](
-    from: GCSItem,
-    to: GCSItem
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
-    copyReq(from, to).map(
-      r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR)
-    )
+  def copyBatch[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
+    copyReq(from, to).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
 
-  protected[tray] def copyReq[F[_]](
-    from: GCSItem,
-    to: GCSItem
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
+  protected[tray] def copyReq[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
     val (uri, method) = ObjectsEndpoints.copy(from, to)
     G.makeRequest(method, uri, EmptyBody)
   }
 
-  private def listingBodyHandler[F[_], T: Decoder](
-    r: Response[F]
-  )(implicit S: Sync[F]): F[ListingResponse[T]] = {
+  private def listingBodyHandler[F[_], T: Decoder](r: Response[F])(implicit S: Sync[F]): F[ListingResponse[T]] = {
     import fs2.text._
     r.body.through(utf8Decode).compile.to(List).flatMap { l =>
       import io.circe.parser._
       decode[ListingResponse[T]](l.mkString) match {
-        case Left(e)  => S.raiseError[ListingResponse[T]](e)
         case Right(s) => S.pure(s)
+        case Left(e) => S.raiseError[ListingResponse[T]](e)
       }
     }
   }
@@ -378,21 +320,18 @@ object Objects {
   /**
     * A listing variant with no field filters.
     */
-  def listFull[F[_]](bucket: String, listingFilter: ListFilter = ListFilter())(
-    implicit G: GCStorage[F],
-    S: Sync[F]
-  ): fs2.Stream[F, ListingResponse[ObjectMetadata]] =
+  def listFull[F[_]](bucket: String,
+    listingFilter: ListFilter = ListFilter()
+  )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[ObjectMetadata]] =
     listGeneric[F, ObjectMetadata](bucket, listingFilter)
 
   /**
     * A listing variant with field filters and a partial variant.
     */
-  def listPartial[F[_]](
-    bucket: String,
-    listingFilter: ListFilter = ListFilter(),
-    fieldFilter: Seq[String] = Seq.empty
-  )(implicit G: GCStorage[F],
-    S: Sync[F]): fs2.Stream[F, ListingResponse[PartialObjectMetadata]] =
+  def listPartial[F[_]](bucket: String, listingFilter: ListFilter = ListFilter(), fieldFilter: Seq[String] = Seq.empty)(
+    implicit G: GCStorage[F],
+    S: Sync[F]
+  ): fs2.Stream[F, ListingResponse[PartialObjectMetadata]] =
     listGeneric[F, PartialObjectMetadata](bucket, listingFilter, fieldFilter)
 
   /**
@@ -408,12 +347,10 @@ object Objects {
   /**
     * Like the decoder flavor of [[listDec]] but returns a map which can be used to find the desired value.
     */
-  def listAnon[F[_]](
-    bucket: String,
-    listingFilter: ListFilter = ListFilter(),
-    fieldFilter: Seq[String] = Seq.empty
-  )(implicit G: GCStorage[F],
-    S: Sync[F]): fs2.Stream[F, ListingResponse[Map[String, Json]]] =
+  def listAnon[F[_]](bucket: String, listingFilter: ListFilter = ListFilter(), fieldFilter: Seq[String] = Seq.empty)(
+    implicit G: GCStorage[F],
+    S: Sync[F]
+  ): fs2.Stream[F, ListingResponse[Map[String, Json]]] =
     listGeneric[F, Map[String, Json]](bucket, listingFilter, fieldFilter)
 
   private def listGeneric[F[_], T: Decoder](
@@ -425,30 +362,19 @@ object Objects {
       ObjectsEndpoints.list(bucket, listingFilter, None, fieldFilter: _*)
 
     val initial: F[ListingResponse[T]] =
-      G.authedRequest(initialMethod, initialUri, EmptyBody)(
-        r => listingBodyHandler[F, T](r)
-      )
+      G.authedRequest(initialMethod, initialUri, EmptyBody)(r => listingBodyHandler[F, T](r))
     // Map over page
     val pages: F[fs2.Stream[F, ListingResponse[T]]] = initial.map { lr =>
       fs2.Stream
         .iterateEval(lr) { prev =>
           prev.nextPageToken match {
             case Some(nextPage) => {
-              val (nextUri, nextMethod) = ObjectsEndpoints.list(
-                bucket,
-                listingFilter,
-                Some(nextPage),
-                fieldFilter: _*
-              )
+              val (nextUri, nextMethod) = ObjectsEndpoints.list(bucket, listingFilter, Some(nextPage), fieldFilter: _*)
 
-              G.authedRequest(nextMethod, nextUri, EmptyBody)(
-                r => listingBodyHandler[F, T](r)
-              )
+              G.authedRequest(nextMethod, nextUri, EmptyBody)(r => listingBodyHandler[F, T](r))
             }
             case None =>
-              S.raiseError[ListingResponse[T]](
-                new Exception("Did not terminate when there was no next page")
-              )
+              S.raiseError[ListingResponse[T]](new Exception("Did not terminate when there was no next page"))
           }
         }
         .takeWhile(_.nextPageToken.isDefined)
@@ -462,19 +388,12 @@ object Objects {
   /**
     * Patches the object metadata.
     */
-  def patchJson[F[_]](
-    item: GCSItem,
-    newMetadata: Json
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+  def patchJson[F[_]](item: GCSItem, newMetadata: Json)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val (uri, m) = ObjectsEndpoints.patch(item)
 
     import fs2.text._
 
-    G.authedRequest(
-      m,
-      uri,
-      fs2.Stream(newMetadata.noSpaces).lift[F].through(utf8Encode)
-    )(_ => S.unit)
+    G.authedRequest(m, uri, fs2.Stream(newMetadata.noSpaces).lift[F].through(utf8Encode))(_ => S.unit)
   }
 
   /**
@@ -493,9 +412,7 @@ object Objects {
     patchJson(item, jo.asJson)
   }
 
-  private def rewriteBodyHandler[F[_]](
-    r: Response[F]
-  )(implicit S: Sync[F]): F[Rewrite] = {
+  private def rewriteBodyHandler[F[_]](r: Response[F])(implicit S: Sync[F]): F[Rewrite] = {
     import fs2.text._
     r.body.through(utf8Decode).compile.to(List).flatMap { l =>
       import io.circe.parser._
@@ -511,11 +428,10 @@ object Objects {
     *
     * @returns A stream which evaluates all the rewrite steps.
     */
-  def rewrite[F[_]](
-    source: GCSItem,
-    target: GCSItem,
-    newMetadata: PartialObjectMetadata = PartialObjectMetadata()
-  )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Rewrite] = {
+  def rewrite[F[_]](source: GCSItem, target: GCSItem, newMetadata: PartialObjectMetadata = PartialObjectMetadata())(
+    implicit G: GCStorage[F],
+    S: Sync[F]
+  ): fs2.Stream[F, Rewrite] = {
     import io.circe.syntax._
 
     val jo: JsonObject = newMetadata.asJsonObject.toMap.filterNot {
@@ -539,14 +455,10 @@ object Objects {
               val (nextUri, nextM) =
                 ObjectsEndpoints.rewrite(source, target, Some(nextToken))
 
-              G.authedRequest(nextM, nextUri, metadataStream)(
-                r => rewriteBodyHandler(r)
-              )
+              G.authedRequest(nextM, nextUri, metadataStream)(r => rewriteBodyHandler(r))
             }
             case None =>
-              S.raiseError[Rewrite](
-                new Exception("Did not terminate on empty rewrite token")
-              )
+              S.raiseError[Rewrite](new Exception("Did not terminate on empty rewrite token"))
           }
         }
         .takeWhile(_.rewriteToken.isDefined)
@@ -560,10 +472,7 @@ object Objects {
   /**
     * Does a single http update call to the GCS endpoint with the supplied metadata changes.
     */
-  def update[F[_]](
-    item: GCSItem,
-    updateMetadata: UpdateMetadata
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+  def update[F[_]](item: GCSItem, updateMetadata: UpdateMetadata)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val (uri, m) = ObjectsEndpoints.update(item)
 
     import fs2.text._
@@ -582,10 +491,7 @@ object Objects {
   /**
     *
     */
-  def watchAll[F[_]](
-    item: GCSItem,
-    watchAll: WatchAll
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+  def watchAll[F[_]](item: GCSItem, watchAll: WatchAll)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val (uri, m) = ObjectsEndpoints.update(item)
 
     import fs2.text._

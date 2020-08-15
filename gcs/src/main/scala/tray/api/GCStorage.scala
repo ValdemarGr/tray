@@ -14,8 +14,9 @@ import tray.underlying.Batch
 /**
  * The Google Storage interface, note that `Sync[F]` is needed as side-effect suspension is used and the fs2 compiler needs this implicit.
  */
-class GCStorage[F[_]: Timer: ConcurrentEffect]
-  (client: Client[F], tokenDispenser: TokenDispenser[F])(implicit F: Monad[F]) {
+class GCStorage[F[_]: Timer: ConcurrentEffect](client: Client[F], tokenDispenser: TokenDispenser[F])(
+  implicit F: Monad[F]
+) {
 
   protected[tray] val baseChunkSize = 256 * 1024
 
@@ -26,7 +27,7 @@ class GCStorage[F[_]: Timer: ConcurrentEffect]
     Range(org.http4s.headers.Range.SubRange(start, end))
 
   protected[tray] def makeRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*): F[Request[F]] =
-    F.map(tokenDispenser.getToken){ token =>
+    F.map(tokenDispenser.getToken) { token =>
       val creds: Credentials.Token = Credentials.Token(AuthScheme.Bearer, token.getTokenValue)
 
       val hs: Seq[Header] = Seq(
@@ -38,24 +39,21 @@ class GCStorage[F[_]: Timer: ConcurrentEffect]
         method = m,
         uri = uri,
         httpVersion = HttpVersion.`HTTP/1.1`,
-        headers = Headers.of(hs: _*),
+        headers = Headers.of(hs: _*)
       ).withEntity(b)
     }
 
-  protected[tray] def authedRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*)
-                                     (handler: Response[F] => F[R]): F[R] = client.fetch(makeRequest(m, uri, b, extraHeaders: _*))(handler)
-  protected[tray] def authedRequest[R](r: Request[F])
-                                     (handler: Response[F] => F[R]): F[R] = client.fetch(r)(handler)
+  protected[tray] def authedRequest[R](m: Method, uri: Uri, b: EntityBody[F], extraHeaders: Header*)(
+    handler: Response[F] => F[R]
+  ): F[R] = client.fetch(makeRequest(m, uri, b, extraHeaders: _*))(handler)
+  protected[tray] def authedRequest[R](r: Request[F])(handler: Response[F] => F[R]): F[R] = client.fetch(r)(handler)
 
-  protected[tray] def unwrapToAB(r: Response[F]): F[Array[Byte]] = {
-    r
-      .body
-      .compile
+  protected[tray] def unwrapToAB(r: Response[F]): F[Array[Byte]] =
+    r.body.compile
       .to(Array)
-  }
 
   val batchAp: Applicative[Batch[*, F]] = Batch.batchInstance[F]
-    /*
+  /*
       def batchedRequest(m: Method, uri: Uri, bodies: fs2.Stream[F, Request[F]], extraHeaders: Header*) = {
         val boundaryId = UUID.randomUUID().toString
         val contentIdBase = UUID.randomUUID().toString
@@ -96,15 +94,19 @@ class GCStorage[F[_]: Timer: ConcurrentEffect]
 
 object GCStorage {
   def apply[F[_]: ConcurrentEffect: Timer](td: TokenDispenser[F]): Resource[F, GCStorage[F]] =
-    AsyncHttpClient.resource[F](new DefaultAsyncHttpClientConfig.Builder()
-      .setMaxConnectionsPerHost(200)
-      .setMaxConnections(400)
-      .setThreadFactory(threadFactory(name = { i =>
-        s"http4s-async-http-client-worker-${i.toString}"
-      }))
-      .setRequestTimeout(50000000)
-      .setReadTimeout(50000000)
-      .build()).map(c => new GCStorage[F](c, td))
+    AsyncHttpClient
+      .resource[F](
+        new DefaultAsyncHttpClientConfig.Builder()
+          .setMaxConnectionsPerHost(200)
+          .setMaxConnections(400)
+          .setThreadFactory(threadFactory(name = { i =>
+            s"http4s-async-http-client-worker-${i.toString}"
+          }))
+          .setRequestTimeout(50000000)
+          .setReadTimeout(50000000)
+          .build()
+      )
+      .map(c => new GCStorage[F](c, td))
 
   def apply[F[_]: ConcurrentEffect: Timer](client: Client[F], td: TokenDispenser[F]): GCStorage[F] =
     new GCStorage(client, td)
