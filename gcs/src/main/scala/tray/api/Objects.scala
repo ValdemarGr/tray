@@ -21,6 +21,12 @@ object Objects {
   import cats.implicits._
   import tray.underlying.RequestUtil._
 
+  def getObjectMetadata[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Array[Byte]] =
+    ObjectsEndpoints.getAlt(item, "json") match {
+      case (uri, m) => G.authedRequest(m, uri, EmptyBody)(G.unwrapToAB)
+    }
+
+
   /**
     * Does a "simple" get which downloads the requested object in "one go".
     *
@@ -287,7 +293,7 @@ object Objects {
   def deleteBatch[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
     deleteReq(item).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
 
-  protected[tray] def deleteReq[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
+  protected[tray] def deleteReq[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Request[F]] = {
     val (uri, method) = ObjectsEndpoints.delete(item)
     G.makeRequest(method, uri, EmptyBody)
   }
@@ -301,7 +307,7 @@ object Objects {
   def copyBatch[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
     copyReq(from, to).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
 
-  protected[tray] def copyReq[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Request[F]] = {
+  protected[tray] def copyReq[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Request[F]] = {
     val (uri, method) = ObjectsEndpoints.copy(from, to)
     G.makeRequest(method, uri, EmptyBody)
   }
@@ -468,6 +474,12 @@ object Objects {
       .eval(its)
       .flatMap(x => x)
   }
+
+  def exists[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Boolean] =
+    ObjectsEndpoints.getAlt(item, "json") match {
+      case (uri, m) => G.authedRequest(m, uri, EmptyBody)(x => S.pure(x.status != Status.NotFound))
+    }
+
 
   /**
     * Does a single http update call to the GCS endpoint with the supplied metadata changes.

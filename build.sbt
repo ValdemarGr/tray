@@ -6,8 +6,8 @@ lazy val gcs = (project in file("gcs"))
   .settings(
     fork in run := true,
     scalaVersion in ThisBuild := "2.12.10",
-    version      in ThisBuild := "0.0.1",
-    name := "via",
+    version in ThisBuild := "0.0.1",
+    name := "tray",
     addCompilerPlugin(("org.typelevel" %% "kind-projector" % "0.11.0").cross(CrossVersion.full)),
     libraryDependencies ++= Seq(
       catsCore,
@@ -35,8 +35,8 @@ lazy val root = (project in file("root"))
   .settings(
     fork in run := true,
     scalaVersion in ThisBuild := "2.12.10",
-    version      in ThisBuild := "0.0.1",
-    name := "via",
+    version in ThisBuild := "0.0.1",
+    name := "tray",
     libraryDependencies ++= Seq(
       catsCore,
       catsEffect,
@@ -70,4 +70,5 @@ lazy val microsite = (project in file("site"))
     micrositeHighlightTheme := "atom-one-light",
     micrositeGithubOwner := "ValdemarGr",
     git.remoteRepo := "git@github.com:ValdemarGr/tray.git"
-  )enablePlugins(GhpagesPlugin)
+  )
+  .enablePlugins(GhpagesPlugin)

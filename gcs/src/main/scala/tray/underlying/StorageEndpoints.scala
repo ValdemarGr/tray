@@ -54,7 +54,8 @@ object StorageEndpoints {
     }
     def delete(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) -> Method.DELETE
     def patch(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) -> Method.PATCH
-    def get(gcsItem: GCSItem): (Uri, Method) = objectBaseUrl(gcsItem) +? ("alt", "media") -> Method.GET
+    def get(gcsItem: GCSItem): (Uri, Method) = getAlt(gcsItem, "media")
+    def getAlt(gcsItem: GCSItem, alt: String): (Uri, Method) = objectBaseUrl(gcsItem) +? ("alt", alt) -> Method.GET
     def getMetadata(gcsItem: GCSItem, filters: String*): (Uri, Method) = {
       val defaultUri = objectBaseUrl(gcsItem) +? ("alt", "json")
       val withOptionalFilter = if (filters.nonEmpty) {
