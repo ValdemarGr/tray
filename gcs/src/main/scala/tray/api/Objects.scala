@@ -7,8 +7,9 @@ import cats.effect.{Concurrent, Sync, Timer}
 import fs2.Chunk
 import io.circe.{Decoder, Json, JsonObject}
 import org.http4s._
-import org.http4s.headers.{`Content-Type`, Location}
+import org.http4s.headers.{Location, `Content-Type`}
 import tray.GCSItem
+import tray.api.GCStorage.Prepared
 import tray.params.{ListFilter, WatchAll}
 import tray.serde._
 import tray.underlying.Batch
@@ -17,9 +18,17 @@ import tray.underlying.StorageEndpoints.ObjectsEndpoints
 import scala.util.Try
 
 object Objects {
-
   import cats.implicits._
   import tray.underlying.RequestUtil._
+
+  protected[tray] def effectfulBatch[F[_] : Sync](p: Prepared[F])(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+    G.runReader (p) map (r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
+
+  protected[tray] def effectfulReq[F[_] : Sync](p: Prepared[F])(implicit G: GCStorage[F]): F[Unit] =
+    effectfulReqAllowErr(Set.empty)(p)
+
+  protected[tray] def effectfulReqAllowErr[F[_]](sc: Set[Status])(p: Prepared[F])(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
+    G.runReader (p) flatMap (G authedRequest GCStorage.raiseOnBadStatus(sc) (_ => S.unit))
 
   def getObjectMetadata[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Array[Byte]] =
     ObjectsEndpoints.getAlt(item, "json") match {
@@ -156,6 +165,26 @@ object Objects {
     }
 
   /**
+  * Composes GCS objects, more can be found in the official GCS documentation.
+  *
+  * @param destinationObject    The object to copy all source objets to.
+  * @param compose              The compose description. It is a 1:1 representation of the documented json payload.
+  */
+  def compose[F[_]: Sync](destinationObject: GCSItem, compose: Compose)(implicit G: GCStorage[F]): F[Unit] =
+    effectfulReq(composeReq[F](destinationObject, compose))
+
+  def composeBatch[F[_]: Sync](destinationObject: GCSItem, compose: Compose)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+    effectfulBatch(composeReq[F](destinationObject, compose))
+
+  protected[tray] def composeReq[F[_]](destinationObject: GCSItem, compose: Compose): Prepared[F] = {
+    import fs2.text._
+    import io.circe.generic.auto._
+    import io.circe.syntax._
+    val (uri, m) = ObjectsEndpoints.compose(destinationObject)
+    GCStorage.makeRequest(m, uri, fs2.Stream(compose.asJson.noSpaces).through(utf8Encode))
+  }
+
+  /**
     * Does a parallel upload with the chunking factor determining how much of the stream to be consumed before beginning a new request.
     *
     * @param item        The bucket/path to upload to.
@@ -287,29 +316,29 @@ object Objects {
   /**
     * Does a simple delete that runs in one http call.
     */
-  def delete[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
-    deleteReq(item).flatMap(r => G.authedRequest(r)(_ => S.unit))
+  def delete[F[_]: Sync](item: GCSItem)(implicit G: GCStorage[F]): F[Unit] =
+    effectfulReq(deleteReq[F](item))
 
-  def deleteBatch[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
-    deleteReq(item).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
+  def deleteBatch[F[_]: Sync](item: GCSItem)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+    effectfulBatch(deleteReq[F](item))
 
-  protected[tray] def deleteReq[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Request[F]] = {
+  protected[tray] def deleteReq[F[_]](item: GCSItem): Prepared[F] = {
     val (uri, method) = ObjectsEndpoints.delete(item)
-    G.makeRequest(method, uri, EmptyBody)
+    GCStorage.makeRequest[F](method, uri, EmptyBody)
   }
 
   /**
     * Does a GCS copy that runs in one http call.
     */
-  def copy[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
-    copyReq(from, to).flatMap(r => G.authedRequest(r)(_ => S.unit))
+  def copy[F[_]: Sync](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Unit] =
+    effectfulReq(copyReq[F](from, to))
 
-  def copyBatch[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Batch[Unit, F]] =
-    copyReq(from, to).map(r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
+  def copyBatch[F[_]: Sync](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+    effectfulBatch(copyReq[F](from, to))
 
-  protected[tray] def copyReq[F[_]](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Request[F]] = {
+  protected[tray] def copyReq[F[_]: Sync](from: GCSItem, to: GCSItem): Prepared[F] = {
     val (uri, method) = ObjectsEndpoints.copy(from, to)
-    G.makeRequest(method, uri, EmptyBody)
+    GCStorage.makeRequest[F](method, uri, EmptyBody)
   }
 
   private def listingBodyHandler[F[_], T: Decoder](r: Response[F])(implicit S: Sync[F]): F[ListingResponse[T]] = {
@@ -475,10 +504,16 @@ object Objects {
       .flatMap(x => x)
   }
 
+  protected[tray] def existsReq[F[_]](item: GCSItem): Prepared[F] = {
+    val (uri, m) = ObjectsEndpoints.getAlt(item, "json")
+    GCStorage.makeRequest[F](m, uri, EmptyBody)
+  }
+  protected[tray] def existsHandler[F[_]](r: Response[F])(implicit S: Sync[F]): F[Boolean] =
+    if (!r.status.isSuccess && r.status != Status.NotFound) GCStorage.raiseResponse(r)
+    else S.pure(r.status != Status.NotFound)
+
   def exists[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Boolean] =
-    ObjectsEndpoints.getAlt(item, "json") match {
-      case (uri, m) => G.authedRequest(m, uri, EmptyBody)(x => S.pure(x.status != Status.NotFound))
-    }
+    G runReader existsReq[F](item) flatMap (G authedRequest existsHandler[F])
 
 
   /**

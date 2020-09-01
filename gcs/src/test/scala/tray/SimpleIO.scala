@@ -27,7 +27,7 @@ class SimpleIO extends AsyncFunSuite {
   test("delete object if already exists") {
     val eff = for {
       e <- Objects.exists(asItem)
-      _ <- if (e) Objects.delete(asItem) else IO.unit
+      _ <- if (e) Objects.delete[IO](asItem) else IO.unit
     } yield {}
     succ(eff)
   }
@@ -36,12 +36,12 @@ class SimpleIO extends AsyncFunSuite {
     val data: fs2.Stream[IO, Byte] = fs2
       .Stream(testData.getBytes(StandardCharsets.UTF_8): _*)
       .lift[IO]
-    succ(Objects.putObject(asItem, data))
+    succ(Objects.putObject[IO](asItem, data))
   }
 
   test("get object from GCS") {
     val eff = for {
-      data <- Objects.getObject(asItem)
+      data <- Objects.getObject[IO](asItem)
     } yield {
       new String(data, StandardCharsets.UTF_8) should be (testData)
     }
@@ -49,7 +49,7 @@ class SimpleIO extends AsyncFunSuite {
   }
 
   test("should clean up") {
-    val eff: IO[Unit] = Objects.delete(asItem)
+    val eff: IO[Unit] = Objects.delete[IO](asItem)
     succ(eff)
   }
 }
