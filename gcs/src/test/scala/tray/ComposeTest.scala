@@ -64,8 +64,10 @@ class ComposeTest extends AsyncFunSuite with GivenWhenThen {
     succ(eff)
   }
 
+/*
   test("should clean up") {
     val eff = items.evalMap(item => Objects.delete[IO](item))
     succ(eff)
   }
+*/
 }

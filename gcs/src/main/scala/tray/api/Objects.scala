@@ -181,7 +181,7 @@ object Objects {
     import io.circe.generic.auto._
     import io.circe.syntax._
     val (uri, m) = ObjectsEndpoints.compose(destinationObject)
-    GCStorage.makeRequest(m, uri, fs2.Stream(compose.asJson.noSpaces).through(utf8Encode))
+    GCStorage.makeRequest(m, uri, fs2.Stream(compose.asJson.noSpaces).through(utf8Encode), `Content-Type`(MediaType.application.json))
   }
 
   /**
@@ -224,6 +224,8 @@ object Objects {
 
       val s =
         Compose(sourceObjects = items, destination = ComposeDestination(contentType = "application/json")).asJson.noSpaces
+
+      println(s)
 
       val (uri, m) = ObjectsEndpoints.compose(item)
 
