@@ -7,6 +7,7 @@ import tray.auth.TokenDispenser
 import scala.concurrent.ExecutionContext
 
 object SharedStorage {
+  val bucket = "os-valdemar"
   private val ec: ExecutionContext = ExecutionContext.Implicits.global
   private implicit val timer: Timer[IO] = IO.timer(ec)
   private implicit val cs: ContextShift[IO] = IO.contextShift(ec)

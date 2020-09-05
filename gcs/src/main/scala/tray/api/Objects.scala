@@ -2,6 +2,7 @@ package tray.api
 
 import java.util.UUID
 
+import cats.{Id, Monoid}
 import cats.data.OptionT
 import cats.effect.{Concurrent, Sync, Timer}
 import fs2.Chunk
@@ -21,6 +22,13 @@ object Objects {
   import cats.implicits._
   import tray.underlying.RequestUtil._
 
+  protected[tray] def beginOffsetRange(begin: Long, endAt: Long, stepSize: Long): fs2.Stream[Id, (Long, Long)] = fs2.Stream.iterate((begin, math.min(begin + stepSize, endAt - 1))){ case (_, prevEnd) =>
+    val offset = prevEnd + 1
+    val start = offset
+    val end = math.min(offset + stepSize, endAt - 1)
+    (start, end)
+  }
+
   protected[tray] def effectfulBatch[F[_] : Sync](p: Prepared[F])(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
     G.runReader (p) map (r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
 
@@ -35,6 +43,36 @@ object Objects {
       case (uri, m) => G.authedRequest(m, uri, EmptyBody)(G.unwrapToAB)
     }
 
+  def getObjectSizeFallback[F[_]](item: GCSItem, endAt: Option[Long])(implicit G: GCStorage[F], S: Sync[F]) =
+    OptionT.fromOption[F](endAt).getOrElseF[Long] {
+      val (uriMetadata, mMetadata) =
+        ObjectsEndpoints.getMetadata(item, "size") // Only query size
+
+      import fs2.text._
+
+      (G.authedRequest(mMetadata, uriMetadata, EmptyBody)(
+        r => r.body.through(utf8Decode).compile.toList.map(_.mkString)
+      ))
+        .flatMap { str =>
+          import io.circe.parser._
+
+          val o: Option[Long] = decode[io.circe.JsonObject](str).toOption
+            .flatMap(_.toMap.get("size"))
+            .flatMap(_.asString)
+            .flatMap(
+              s =>
+                Try {
+                  s.toLong
+                }.toOption
+            )
+
+          o match {
+            case Some(l) => S.pure(l)
+            case None =>
+              S.raiseError[Long](new Exception(s"failed to parse response data ${str}"))
+          }
+        }
+    }
 
   /**
     * Does a "simple" get which downloads the requested object in "one go".
@@ -69,36 +107,7 @@ object Objects {
   )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Chunk[Byte]] = {
     val (uri, m) = ObjectsEndpoints.get(item)
     val chunkSize: Long = chunkFactor * G.baseChunkSize
-    val lengthWithFallback: F[Long] =
-      OptionT.fromOption[F](endAt).getOrElseF[Long] {
-        val (uriMetadata, mMetadata) =
-          ObjectsEndpoints.getMetadata(item, "size") // Only query size
-
-        import fs2.text._
-
-        (G.authedRequest(mMetadata, uriMetadata, EmptyBody)(
-            r => r.body.through(utf8Decode).compile.toList.map(_.mkString)
-          ))
-          .flatMap { str =>
-            import io.circe.parser._
-
-            val o: Option[Long] = decode[io.circe.JsonObject](str).toOption
-              .flatMap(_.toMap.get("size"))
-              .flatMap(_.asString)
-              .flatMap(
-                s =>
-                  Try {
-                    s.toLong
-                  }.toOption
-              )
-
-            o match {
-              case Some(l) => S.pure(l)
-              case None =>
-                S.raiseError[Long](new Exception(s"failed to parse response data ${str}"))
-            }
-          }
-      }
+    val lengthWithFallback: F[Long] = getObjectSizeFallback(item, endAt)
 
     val firstRequest: F[(OffsetWithBody, Long)] = lengthWithFallback.flatMap { end =>
       val h = G.rangeHeader(beginAt, math.min(chunkSize, end))
@@ -151,6 +160,46 @@ object Objects {
     fs2.Stream
       .eval(streamF)
       .flatMap(x => x)
+  }
+
+  protected[tray] implicit val byteMonoid: Monoid[Chunk[Byte]] = new Monoid[Chunk[Byte]] {
+    override def empty: Chunk[Byte] = Chunk.empty[Byte]
+    override def combine(x: Chunk[Byte], y: Chunk[Byte]): Chunk[Byte] = Chunk.bytes(x.toArray ++ y.toArray)
+  }
+
+  /**
+    * Parallel version of [[getObjectChunked]]
+    *
+    * @param parallelism determines how many requests will be performed in parallel
+    */
+  def getObjectParallel[F[_] : Timer : Sync : Concurrent](item: GCSItem,
+                                             chunkFactor: Long,
+                                             parallelism: Int,
+                                             beginAt: Long = 0,
+                                             onFailure: Long => F[Unit],
+                                             endAt: Option[Long] = None
+                                            )(implicit G: GCStorage[F]): fs2.Stream[F, Chunk[Byte]] = {
+    val chunkSize: Long = chunkFactor * G.baseChunkSize
+    val lengthWithFallbackF: F[Long] = getObjectSizeFallback(item, endAt)
+    // It is important that we materialize the list since we don't want the concurrent effects to be dependent on the previous
+    val outF = lengthWithFallbackF.map{ lwf =>
+      val rangesF: List[(Long, Long)] = beginOffsetRange(beginAt, lwf, chunkSize).compile.toList
+
+      // Instead of doing n=chunks chunked requests we do k=parallelism requests of k/n chunks
+      fs2.Stream(rangesF: _*)
+        .chunkN(((beginAt - lwf) / parallelism).toInt)
+        .map(chunks => for {
+          firstStart <- chunks.head.map { case (start, _) => start }
+          lastEnd <- chunks.last.map { case (_, end) => end }
+        } yield (firstStart, lastEnd))
+        .flatMap {
+          case Some(x) => fs2.Stream(x)
+          case None => fs2.Stream.empty
+        }
+        .lift[F]
+        .parEvalMap(parallelism) { case (start, end) => getObjectChunked(item, chunkFactor, onFailure, start, Some(end)).compile.foldMonoid }
+    }
+    fs2.Stream.eval(outF).flatten
   }
 
   /**

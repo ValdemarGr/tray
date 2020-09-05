@@ -20,7 +20,7 @@ class SimpleIO extends AsyncFunSuite {
   import SharedStorage._
 
   val name = "simple-io-object"
-  val asItem = GCSItem("os-valdemar", name)
+  val asItem = GCSItem(bucket, name)
 
   val testData = "Helooooo"
 

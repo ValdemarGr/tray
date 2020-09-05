@@ -25,9 +25,9 @@ class ComposeTest extends AsyncFunSuite with GivenWhenThen {
   val name1 = "compose-object-1"
   val name2 = "compose-object-2"
   val name3 = "compose-destinationobject"
-  val asItem1 = GCSItem("os-valdemar", name1)
-  val asItem2 = GCSItem("os-valdemar", name2)
-  val composeDestination = GCSItem("os-valdemar", name3)
+  val asItem1 = GCSItem(bucket, name1)
+  val asItem2 = GCSItem(bucket, name2)
+  val composeDestination = GCSItem(bucket, name3)
   val putItems = fs2.Stream(asItem1, asItem2)
   val items = putItems ++ fs2.Stream(composeDestination)
 
@@ -64,10 +64,8 @@ class ComposeTest extends AsyncFunSuite with GivenWhenThen {
     succ(eff)
   }
 
-/*
   test("should clean up") {
     val eff = items.evalMap(item => Objects.delete[IO](item))
     succ(eff)
   }
-*/
 }
