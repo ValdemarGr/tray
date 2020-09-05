@@ -164,7 +164,7 @@ object Objects {
 
   protected[tray] implicit val byteMonoid: Monoid[Chunk[Byte]] = new Monoid[Chunk[Byte]] {
     override def empty: Chunk[Byte] = Chunk.empty[Byte]
-    override def combine(x: Chunk[Byte], y: Chunk[Byte]): Chunk[Byte] = Chunk.bytes(x.toArray ++ y.toArray)
+    override def combine(x: Chunk[Byte], y: Chunk[Byte]): Chunk[Byte] = Chunk.bytes((x.toVector ++ y.toVector).toArray)
   }
 
   /**
@@ -173,16 +173,16 @@ object Objects {
     * @param parallelism determines how many requests will be performed in parallel
     */
   def getObjectParallel[F[_] : Timer : Sync : Concurrent](item: GCSItem,
-                                             chunkFactor: Long,
-                                             parallelism: Int,
-                                             beginAt: Long = 0,
-                                             onFailure: Long => F[Unit],
-                                             endAt: Option[Long] = None
-                                            )(implicit G: GCStorage[F]): fs2.Stream[F, Chunk[Byte]] = {
+                                                          chunkFactor: Long,
+                                                          parallelism: Int,
+                                                          onFailure: Long => F[Unit],
+                                                          beginAt: Long = 0,
+                                                          endAt: Option[Long] = None
+                                                         )(implicit G: GCStorage[F]): fs2.Stream[F, Chunk[Byte]] = {
     val chunkSize: Long = chunkFactor * G.baseChunkSize
     val lengthWithFallbackF: F[Long] = getObjectSizeFallback(item, endAt)
     // It is important that we materialize the list since we don't want the concurrent effects to be dependent on the previous
-    val outF = lengthWithFallbackF.map{ lwf =>
+    val outF = lengthWithFallbackF.map { lwf =>
       val rangesF: List[(Long, Long)] = beginOffsetRange(beginAt, lwf, chunkSize).compile.toList
 
       // Instead of doing n=chunks chunked requests we do k=parallelism requests of k/n chunks
@@ -273,8 +273,6 @@ object Objects {
 
       val s =
         Compose(sourceObjects = items, destination = ComposeDestination(contentType = "application/json")).asJson.noSpaces
-
-      println(s)
 
       val (uri, m) = ObjectsEndpoints.compose(item)
 

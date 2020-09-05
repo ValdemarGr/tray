@@ -42,10 +42,7 @@ class GCStorage[F[_]: Timer: ConcurrentEffect](client: Client[F], tokenDispenser
     } yield o
 
   protected[tray] def authedRequest[R](handler: Response[F] => F[R])(r: Request[F]): F[R] =
-    /*println(r)
-    r.body.compile
-      .to(Array)
-      .flatTap(s => S.delay(println(new String(s, StandardCharsets.UTF_8)))) *> */ client.fetch(r)(handler)
+    client.fetch(r)(handler)
 
   protected[tray] def unwrapToAB(r: Response[F]): F[Array[Byte]] =
     r.body.compile
