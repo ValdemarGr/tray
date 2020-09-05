@@ -161,7 +161,7 @@ object Objects {
     */
   def putObject[F[_]](item: GCSItem, data: fs2.Stream[F, Byte])(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
     ObjectsEndpoints.put(item) match {
-      case (uri, m) => G.authedRequest(m, uri, data)(_ => S.unit)
+      case (uri, m) => G.authedRequest(m, uri, data)(GCStorage.raiseEffectfulBadStatus)
     }
 
   /**

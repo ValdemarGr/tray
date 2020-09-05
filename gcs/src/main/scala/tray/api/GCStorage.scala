@@ -19,7 +19,9 @@ import tray.underlying.Batch
 /**
  * The Google Storage interface, note that `Sync[F]` is needed as side-effect suspension is used and the fs2 compiler needs this implicit.
  */
-class GCStorage[F[_]: Timer: ConcurrentEffect](client: Client[F], tokenDispenser: TokenDispenser[F]) {
+class GCStorage[F[_]: Timer: ConcurrentEffect](client: Client[F], tokenDispenser: TokenDispenser[F]) /*(
+  implicit S: Sync[F]
+)*/ {
 
   protected[tray] val baseChunkSize = 256 * 1024
 
@@ -40,7 +42,10 @@ class GCStorage[F[_]: Timer: ConcurrentEffect](client: Client[F], tokenDispenser
     } yield o
 
   protected[tray] def authedRequest[R](handler: Response[F] => F[R])(r: Request[F]): F[R] =
-    client.fetch(r)(handler)
+    /*println(r)
+    r.body.compile
+      .to(Array)
+      .flatTap(s => S.delay(println(new String(s, StandardCharsets.UTF_8)))) *> */ client.fetch(r)(handler)
 
   protected[tray] def unwrapToAB(r: Response[F]): F[Array[Byte]] =
     r.body.compile
@@ -139,5 +144,8 @@ object GCStorage {
         headers = Headers.of(hs: _*)
       ).withEntity(b)
     }
+
+  protected[tray] def raiseEffectfulBadStatus[F[_]](implicit S: Sync[F]): Response[F] => F[Unit] =
+    raiseOnBadStatus[F, Unit](Set.empty)(_ => S.unit)
 
 }

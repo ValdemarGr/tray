@@ -47,15 +47,17 @@ class ComposeTest extends AsyncFunSuite with GivenWhenThen {
 
   test("get compose the GCS objects") {
     val c = ComposeDestination("application/text")
-    Given(s"the list ${putItems.compile.toList.map(_.path).map(ComposeItem)}")
-    succ(Objects.compose[IO](composeDestination, Compose(putItems.compile.toList.map(_.path).map(ComposeItem), c)))
+    val items = putItems.compile.toList.map(_.path).map(ComposeItem)
+    Given(s"the list ${items}")
+    val _ = (items should have).length(2)
+    succ(Objects.compose[IO](composeDestination, Compose(items, c)))
   }
 
   test("get composed object from GCS") {
     val eff = for {
       d <- Objects.getObject[IO](composeDestination)
     } yield {
-      val e = putItems.map(_ => testData).compile.fold(""){ case (x, y) => x + y}
+      val e = putItems.map(_ => testData).compile.fold("") { case (x, y) => x + y }
       val s = new String(d, StandardCharsets.UTF_8)
       s should be(e)
     }

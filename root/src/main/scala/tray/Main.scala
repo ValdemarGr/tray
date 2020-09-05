@@ -1,7 +1,7 @@
 package tray
 
 import cats.effect.{ExitCode, IO, IOApp, Resource}
-import tray.api.GCStorage
+import tray.api.{GCStorage, Objects}
 import tray.auth.TokenDispenser
 
 object Main extends IOApp {
@@ -12,7 +12,9 @@ object Main extends IOApp {
 
   override def run(args: List[String]): IO[ExitCode] =
     storage
-      .use { _ =>
-        IO(ExitCode.Success)
+      .use { implicit s =>
+      import fs2.text._
+      val data = fs2.Stream("a", "b", "c").repeat.take(1024 * 1024 * 4).through(utf8Encode)
+        Objects.putParallel(GCSItem("os-valdemar", "testeheste"), data.lift[IO], 4, 1, "temporary") *> IO.pure(ExitCode.Success)
       }
 }
