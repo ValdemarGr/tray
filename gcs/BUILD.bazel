@@ -1,6 +1,6 @@
 scala_library(
     name = "gcs",
-    srcs = glob(["**/*.scala"]),
+    srcs = glob(["**/main/scala/tray/*.scala"]),
     plugins = ["@maven//:org_typelevel_kind_projector_2_12"],
     deps = [
         "@maven//:co_fs2_fs2_core_2_12",
