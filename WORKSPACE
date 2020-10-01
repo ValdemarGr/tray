@@ -2,6 +2,20 @@ workspace(name = "tray")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+RULES_JVM_EXTERNAL_TAG = "3.3"
+
+RULES_JVM_EXTERNAL_SHA = "d85951a92c0908c80bd8551002d66cb23c3434409c814179c0ff026b53544dab"
+
+http_archive(
+    name = "rules_jvm_external",
+    sha256 = RULES_JVM_EXTERNAL_SHA,
+    strip_prefix = "rules_jvm_external-%s" % RULES_JVM_EXTERNAL_TAG,
+    url = "https://github.com/bazelbuild/rules_jvm_external/archive/%s.zip" % RULES_JVM_EXTERNAL_TAG,
+)
+
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# bazel-skylib 0.8.0 released 2019.03.20 (https://github.com/bazelbuild/bazel-skylib/releases/tag/0.8.0)
 skylib_version = "0.8.0"
 
 http_archive(
@@ -11,23 +25,36 @@ http_archive(
     url = "https://github.com/bazelbuild/bazel-skylib/releases/download/{}/bazel-skylib.{}.tar.gz".format(skylib_version, skylib_version),
 )
 
-rules_scala_version = "a2f5852902f5b9f0302c727eead52ca2c7b6c3e2"  # update this as needed
+rules_scala_version = "725b00465b83b776b5ad22eada026c3546df635c"  # update this as needed
 
 http_archive(
     name = "io_bazel_rules_scala",
-    sha256 = "8c48283aeb70e7165af48191b0e39b7434b0368718709d1bced5c3781787d8e7",
+    sha256 = "0a1189d4701e35d962a07baf4016f899588133ce39dd1f2f7fe9a8d8e515156e",
     strip_prefix = "rules_scala-%s" % rules_scala_version,
     type = "zip",
     url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % rules_scala_version,
 )
 
-load("@io_bazel_rules_scala//scala:toolchains.bzl", "scala_register_toolchains")
+load("@io_bazel_rules_scala//:version.bzl", "bazel_version")
 
-scala_register_toolchains()
+bazel_version(name = "bazel_version")
+
+#load("@io_bazel_rules_scala//scala:toolchains.bzl", "scala_register_toolchains")
+#
+#scala_register_toolchains()
+
+register_toolchains("//toolchains:main-scala_toolchain")
 
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
 
-scala_repositories()
+scala_repositories((
+    "2.12.10",
+    {
+        "scala_compiler": "cedc3b9c39d215a9a3ffc0cc75a1d784b51e9edc7f13051a1b4ad5ae22cfbc0c",
+        "scala_library": "0a57044d10895f8d3dd66ad4286891f607169d948845ac51e17b4c1cf0ab569d",
+        "scala_reflect": "56b609e1bab9144fb51525bfa01ccd72028154fc40a58685a1e9adcbe7835730",
+    },
+))
 
 protobuf_version = "3.11.3"
 
@@ -46,4 +73,14 @@ load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
 
-load("@io_bazel_rules_scala//scala:scala.bzl", "scala_binary", "scala_library", "scala_test")
+load("//:third_party.bzl", "dependencies")
+
+dependencies("12")
+
+#load("//3rdparty:workspace.bzl", "maven_dependencies")
+#
+#maven_dependencies()
+#
+#load("//3rdparty:target_file.bzl", "build_external_workspace")
+#
+#build_external_workspace(name = "third_party")

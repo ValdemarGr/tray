@@ -1,0 +1,16 @@
+# //toolchains/BUILD
+load("@io_bazel_rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
+#load("@io_bazel_rules_scala//scala:providers.bzl", "declare_deps_provider")
+
+scala_toolchain(
+    name = "main-toolchain",
+    scalacopts = [],
+    visibility = ["//visibility:public"],
+)
+
+toolchain(
+    name = "main-scala_toolchain",
+    toolchain = "main-toolchain",
+    toolchain_type = "@io_bazel_rules_scala//scala:toolchain_type",
+    visibility = ["//visibility:public"],
+)
