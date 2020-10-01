@@ -8,3 +8,4 @@ project/project
 bazel-bin
 bazel-out
 bazel-testlogs
+bazel-tray
