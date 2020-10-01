@@ -4,3 +4,7 @@ project/project
 .bloop
 .metals
 .jekyll-cache
+
+bazel-bin
+bazel-out
+bazel-testlogs
