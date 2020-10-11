@@ -9,3 +9,5 @@ bazel-bin
 bazel-out
 bazel-testlogs
 bazel-tray
+
+.ijwb
