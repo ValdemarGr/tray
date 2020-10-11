@@ -1,2 +1,7 @@
 build --strategy=Scalac=worker
 build --worker_sandboxing
+#build --host_javabase=@local_jdk//:jdk
+#build --define=ABSOLUTE_JAVABASE=/usr/lib/jvm/java-8-openjdk
+#build --host_javabase=@bazel_tools//tools/jdk:absolute_javabase
+#build --host_java_toolchain=@bazel_tools//tools/jdk:toolchain_vanilla
+#build --java_toolchain=@bazel_tools//tools/jdk:toolchain_vanilla

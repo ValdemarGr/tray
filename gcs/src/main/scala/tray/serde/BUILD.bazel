@@ -4,7 +4,10 @@ load("@bazel_skylib//lib:collections.bzl", "collections")
 package(default_visibility = ["//visibility:public"])
 
 scala_library(
-    name = "gcs-root",
-    srcs = [],
-    deps = ["//gcs/src/main/scala/tray/api:gcs-api"],
+    name = "gcs-serde",
+    srcs = glob(["*.scala"]),
+    deps = collections.uniq(
+        importable["circe-core"] +
+        importable["circe-generic"],
+    ),
 )

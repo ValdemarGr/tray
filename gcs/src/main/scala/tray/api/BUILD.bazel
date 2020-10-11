@@ -1,0 +1,27 @@
+load("//:third_party.bzl", "importable")
+load("@bazel_skylib//lib:collections.bzl", "collections")
+
+package(default_visibility = ["//visibility:public"])
+
+scala_library(
+    name = "gcs-api",
+    srcs = glob(["*.scala"]),
+    plugins = ["@maven//:org_typelevel_kind_projector_2_12"],
+    deps = [
+        "//gcs/src/main/scala/tray/auth:gcs-auth",
+        "//gcs/src/main/scala/tray/core:gcs-core",
+        "//gcs/src/main/scala/tray/params:gcs-params",
+        "//gcs/src/main/scala/tray/serde:gcs-serde",
+        "//gcs/src/main/scala/tray/batch:gcs-batch",
+    ] + collections.uniq(
+        importable["google-auth-library-oauth2-http"] +
+        importable["http4s-core"] +
+        importable["http4s-async-http-client"] +
+        importable["fs2-core"] +
+        importable["cats-effect"] +
+        importable["cats-core"] +
+        importable["circe-core"] +
+        importable["circe-parser"] +
+        importable["circe-generic"],
+    ),
+)

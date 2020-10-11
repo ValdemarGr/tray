@@ -1,4 +1,4 @@
-package tray.underlying
+package tray.batch
 
 import cats.Applicative
 import org.http4s.{Request, Response}

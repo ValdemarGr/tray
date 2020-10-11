@@ -4,7 +4,11 @@ load("@io_bazel_rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
 
 scala_toolchain(
     name = "main-toolchain",
+    dependency_mode = "direct",
+    dependency_tracking_method = "high-level",
     scalacopts = [],
+    strict_deps_mode = "error",
+    unused_dependency_checker_mode = "warn",
     visibility = ["//visibility:public"],
 )
 

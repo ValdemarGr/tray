@@ -2,11 +2,11 @@ package tray
 
 import java.nio.charset.StandardCharsets
 
-import cats.effect.{ContextShift, IO, Timer}
 import org.scalatest.funsuite.AsyncFunSuite
 import org.scalatest.matchers.should.Matchers._
 import org.scalatest.{Assertion, GivenWhenThen, Succeeded}
 import tray.api.Objects
+import tray.core.GCSItem
 import tray.serde._
 import tray.serde.Compose.{ComposeDestination, ComposeItem}
 

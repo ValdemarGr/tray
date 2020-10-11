@@ -1,4 +1,4 @@
-package tray
+package tray.core
 
 case class GCSItem(
                   bucket: String,

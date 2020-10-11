@@ -1,66 +1,9 @@
+load("//:third_party.bzl", "importable")
+load("@bazel_skylib//lib:collections.bzl", "collections")
+
 scala_library(
     name = "gcs",
-    srcs = glob(["**/main/scala/tray/*.scala"]),
-    plugins = ["@maven//:org_typelevel_kind_projector_2_12"],
-    deps = [
-        "@maven//:co_fs2_fs2_core_2_12",
-        "@maven//:co_fs2_fs2_io_2_12",
-        #
-        "@maven//:com_google_auth_google_auth_library_oauth2_http",
-        "@maven//:com_google_cloud_google_cloud_core",
-        "@maven//:com_google_cloud_google_cloud_storage",
-        #
-        "@maven//:io_circe_circe_core_2_12",
-        "@maven//:io_circe_circe_generic_2_12",
-        "@maven//:io_circe_circe_parser_2_12",
-        #
-        "@maven//:org_http4s_http4s_async_http_client_2_12",
-        "@maven//:org_http4s_http4s_blaze_server_2_12",
-        "@maven//:org_http4s_http4s_core_2_12",
-        "@maven//:org_http4s_http4s_dsl_2_12",
-        #
-        "@maven//:org_scalacheck_scalacheck_2_12",
-        "@maven//:org_scalatest_scalatest_2_12",
-        "@maven//:org_scalatestplus_scalatestplus_scalacheck_2_12",
-        #
-        "@maven//:org_typelevel_cats_core_2_12",
-        "@maven//:org_typelevel_cats_effect_2_12",
-        "@maven//:org_typelevel_cats_free_2_12",
-        #
-        "@maven//:org_scalactic_scalactic_2_12",  # Transitive
-        "@maven//:org_http4s_parboiled_2_12",  # Transitive
-        "@maven//:org_http4s_http4s_client_2_12",  # Transitive
-        "@maven//:org_typelevel_cats_kernel_2_12",  # Transitive
-        "@maven//:com_chuusai_shapeless_2_12",  # Transitive
-        "@maven//:io_chrisdavenport_vault_2_12",  # Transitive
-        "@maven//:org_scodec_scodec_bits_2_12",  # Transitive
-        "@maven//:org_asynchttpclient_async_http_client",  # Transitive
-        "@maven//:com_google_auth_google_auth_library_credentials",  # Transitive
-        ##
-        #"@third_party//3rdparty/jvm/com/google/auth:google_auth_library_oauth2_http",
-        #"@third_party//3rdparty/jvm/com/google/cloud:google_cloud_core",
-        #"@third_party//3rdparty/jvm/com/google/cloud:google_cloud_storage",
-        ##
-        #"@third_party//3rdparty/jvm/co/fs2:fs2_core",
-        #"@third_party//3rdparty/jvm/co/fs2:fs2_io",
-        ##
-        #"@third_party//3rdparty/jvm/io/circe:circe_core",
-        #"@third_party//3rdparty/jvm/io/circe:circe_generic",
-        #"@third_party//3rdparty/jvm/io/circe:circe_parser",
-        ##
-        #"@third_party//3rdparty/jvm/org/http4s:http4s_async_http_client",
-        #"@third_party//3rdparty/jvm/org/http4s:http4s_blaze_server",
-        #"@third_party//3rdparty/jvm/org/http4s:http4s_core",
-        #"@third_party//3rdparty/jvm/org/http4s:http4s_dsl",
-        ##
-        #"@third_party//3rdparty/jvm/org/scalacheck",
-        #"@third_party//3rdparty/jvm/org/scalatest",
-        #"@third_party//3rdparty/jvm/org/scalatestplus:scalatestplus_scalacheck",
-        ##
-        #"@third_party//3rdparty/jvm/org/typelevel:cats_core",
-        #"@third_party//3rdparty/jvm/org/typelevel:cats_effect",
-        #"@third_party//3rdparty/jvm/org/typelevel:cats_free",
-        ##
-        #"@third_party//3rdparty/jvm/org/scalactic:scalactic",
-    ],
+    visibility = ["//visibility:public"],
+    deps = ["//gcs/src/main/scala/tray:gcs-root"],
+    #plugins = ["@maven//:org_typelevel_kind_projector_2_12"],
 )

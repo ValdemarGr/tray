@@ -1,8 +1,8 @@
 package tray
 
-import cats.effect.{ExitCode, IO, IOApp, Resource}
 import tray.api.{GCStorage, Objects}
 import tray.auth.TokenDispenser
+import tray.core.GCSItem
 import tray.serde.Compose
 import tray.serde.Compose.{ComposeDestination, ComposeItem}
 

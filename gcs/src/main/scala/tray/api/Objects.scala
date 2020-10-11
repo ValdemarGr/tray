@@ -9,18 +9,18 @@ import fs2.Chunk
 import io.circe.{Decoder, Json, JsonObject}
 import org.http4s._
 import org.http4s.headers.{Location, `Content-Type`}
-import tray.GCSItem
 import tray.api.GCStorage.Prepared
+import tray.core.GCSItem
 import tray.params.{ListFilter, WatchAll}
 import tray.serde._
-import tray.underlying.Batch
-import tray.underlying.StorageEndpoints.ObjectsEndpoints
+import tray.batch.Batch
+import tray.core.StorageEndpoints.ObjectsEndpoints
 
 import scala.util.Try
 
 object Objects {
   import cats.implicits._
-  import tray.underlying.RequestUtil._
+  import RequestUtil._
 
   protected[tray] def beginOffsetRange(begin: Long, endAt: Long, stepSize: Long): fs2.Stream[Id, (Long, Long)] = fs2.Stream.iterate((begin, math.min(begin + stepSize, endAt - 1))){ case (_, prevEnd) =>
     val offset = prevEnd + 1

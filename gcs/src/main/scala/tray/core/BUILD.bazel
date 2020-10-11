@@ -1,0 +1,13 @@
+load("//:third_party.bzl", "importable")
+load("@bazel_skylib//lib:collections.bzl", "collections")
+
+package(default_visibility = ["//visibility:public"])
+
+scala_library(
+    name = "gcs-core",
+    srcs = glob(["*.scala"]),
+    deps = ["//gcs/src/main/scala/tray/params:gcs-params"] + collections.uniq(
+        importable["http4s-core"] +
+        importable["cats-core"],
+    ),
+)

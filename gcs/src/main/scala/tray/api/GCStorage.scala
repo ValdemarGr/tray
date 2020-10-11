@@ -14,7 +14,7 @@ import org.http4s.client.asynchttpclient.AsyncHttpClient
 import org.http4s.headers._
 import org.http4s.util.threads.threadFactory
 import tray.auth.TokenDispenser
-import tray.underlying.Batch
+import tray.batch.Batch
 
 /**
  * The Google Storage interface, note that `Sync[F]` is needed as side-effect suspension is used and the fs2 compiler needs this implicit.

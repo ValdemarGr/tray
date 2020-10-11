@@ -1,7 +1,6 @@
-package tray.underlying
+package tray.core
 
 import org.http4s.Uri.Path
-import tray.GCSItem
 import tray.params.ListFilter
 
 object StorageEndpoints {

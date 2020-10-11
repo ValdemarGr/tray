@@ -1,0 +1,14 @@
+load("//:third_party.bzl", "importable")
+load("@bazel_skylib//lib:collections.bzl", "collections")
+
+package(default_visibility = ["//visibility:public"])
+
+scala_library(
+    name = "gcs-batch",
+    srcs = glob(["*.scala"]),
+    plugins = ["@maven//:org_typelevel_kind_projector_2_12"],
+    deps = collections.uniq(
+        importable["cats-core"] +
+        importable["http4s-core"],
+    ),
+)

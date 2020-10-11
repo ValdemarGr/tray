@@ -1,9 +1,8 @@
-package tray.underlying
+package tray.api
 
-import cats.effect.{Sync, Timer}
+import cats.effect._
 import fs2.Chunk
-import org.http4s.{EntityBody, Header, Method, Response, Status, Uri}
-import tray.api.GCStorage
+import org.http4s._
 
 object RequestUtil {
   import cats.implicits._
