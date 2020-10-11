@@ -9,11 +9,11 @@ import tray.api.Objects
 import tray.core.GCSItem
 import tray.serde._
 import tray.serde.Compose.{ComposeDestination, ComposeItem}
+import cats.effect._
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class ComposeTest extends AsyncFunSuite with GivenWhenThen {
-  implicit override def executionContext: ExecutionContext = ExecutionContext.Implicits.global
   implicit val timer: Timer[IO] = IO.timer(executionContext)
   implicit val cs: ContextShift[IO] = IO.contextShift(executionContext)
 

@@ -7,11 +7,11 @@ import org.scalatest.matchers.should.Matchers._
 import org.scalatest.{Assertion, Succeeded}
 import tray.api.Objects
 import tray.core.GCSItem
+import cats.effect._
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class SimpleIO extends AsyncFunSuite {
-  implicit override def executionContext: ExecutionContext = ExecutionContext.Implicits.global
   implicit val timer: Timer[IO] = IO.timer(executionContext)
   implicit val cs: ContextShift[IO] = IO.contextShift(executionContext)
 

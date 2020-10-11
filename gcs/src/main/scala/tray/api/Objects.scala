@@ -16,34 +16,28 @@ import tray.serde._
 import tray.batch.Batch
 import tray.core.StorageEndpoints.ObjectsEndpoints
 
+import scala.collection.immutable.TreeMap
+import scala.collection.{SortedSet, mutable}
 import scala.util.Try
 
+
+/*
+  This object represents the Objects section of the GCS api.
+  https://cloud.google.com/storage/docs/json_api/v1#objects
+
+  All operations that do not carry any raw payload, support batching.
+ */
 object Objects {
+
   import cats.implicits._
   import RequestUtil._
 
-  protected[tray] def beginOffsetRange(begin: Long, endAt: Long, stepSize: Long): fs2.Stream[Id, (Long, Long)] = fs2.Stream.iterate((begin, math.min(begin + stepSize, endAt - 1))){ case (_, prevEnd) =>
-    val offset = prevEnd + 1
-    val start = offset
-    val end = math.min(offset + stepSize, endAt - 1)
-    (start, end)
-  }
-
-  protected[tray] def effectfulBatch[F[_] : Sync](p: Prepared[F])(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
-    G.runReader (p) map (r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
-
-  protected[tray] def effectfulReq[F[_] : Sync](p: Prepared[F])(implicit G: GCStorage[F]): F[Unit] =
-    effectfulReqAllowErr(Set.empty)(p)
-
-  protected[tray] def effectfulReqAllowErr[F[_]](sc: Set[Status])(p: Prepared[F])(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
-    G.runReader (p) flatMap (G authedRequest GCStorage.raiseOnBadStatus(sc) (_ => S.unit))
-
-  def getObjectMetadata[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Array[Byte]] =
+  protected[tray] def getObjectMetadata[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Array[Byte]] =
     ObjectsEndpoints.getAlt(item, "json") match {
       case (uri, m) => G.authedRequest(m, uri, EmptyBody)(G.unwrapToAB)
     }
 
-  def getObjectSizeFallback[F[_]](item: GCSItem, endAt: Option[Long])(implicit G: GCStorage[F], S: Sync[F]) =
+  protected[tray] def getObjectSizeFallback[F[_]](item: GCSItem, endAt: Option[Long])(implicit G: GCStorage[F], S: Sync[F]) =
     OptionT.fromOption[F](endAt).getOrElseF[Long] {
       val (uriMetadata, mMetadata) =
         ObjectsEndpoints.getMetadata(item, "size") // Only query size
@@ -75,36 +69,38 @@ object Objects {
     }
 
   /**
-    * Does a "simple" get which downloads the requested object in "one go".
-    *
-    * @param item The item to get.
-    */
+   * Does a "simple" get which downloads the requested object in "one go".
+   *
+   * @param item The item to get.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/get]]
+   */
   def getObject[F[_]](item: GCSItem)(implicit G: GCStorage[F]): F[Array[Byte]] =
     ObjectsEndpoints.get(item) match {
       case (uri, m) => G.authedRequest(m, uri, EmptyBody)(G.unwrapToAB)
     }
 
   /**
-    * Does a resumable upload, effectively chunking the requests. It is not parallel.
-    * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
-    *
-    * Getting should not be done in parallel, since it requires the previous result's range header to determine the next offset.
-    * If parallelism is wished for, once should instead create a stream of [0-99, 100-199, 200-299...], then request the objects using either of the two get methods by using something like [[fs2.Stream.parEvalMapUnordered]].
-    *
-    * @param item        The bucket/path to upload to.
-    * @param chunkFactor The "factor" of size of chunks such that 256kb sized chunks will be downloaded, so this integer will determine the payload size, eg 256kb * chunkFactor.
-    * @param onFailure   The handler for failures, the parameter is the amount of bytes downloaded (also present in the returned stream). An option is to raise an error in this handler as the effect will eventually propagate up to the compiled and executed stream.
-    * @param beginAt     =0 An optional parameter that specifies at what byte to start, useful for resuming a failed download or request partial data.
-    * @param endAt       =None An optional parameter that specifies at what byte to end, useful for requesting the partial representation of an object, if not specified will get the object metadata first to determine the value.
-    * @return A stream of data. This stream might have a raised error in it (for multiple reasons such as api errors or raising one in onFailure.
-    */
-  def getObjectChunked[F[_]: Timer](
-    item: GCSItem,
-    chunkFactor: Long,
-    onFailure: Long => F[Unit],
-    beginAt: Long = 0,
-    endAt: Option[Long] = None
-  )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Chunk[Byte]] = {
+   * Does a resumable upload, effectively chunking the requests. It is not parallel.
+   * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
+   *
+   * Getting should not be done in parallel, since it requires the previous result's range header to determine the next offset.
+   * If parallelism is wished for, once should instead create a stream of [0-99, 100-199, 200-299...], then request the objects using either of the two get methods by using something like [[fs2.Stream.parEvalMapUnordered]].
+   *
+   * @param item        The bucket/path to upload to.
+   * @param chunkFactor The "factor" of size of chunks such that 256kb sized chunks will be downloaded, so this integer will determine the payload size, eg 256kb * chunkFactor.
+   * @param onFailure   The handler for failures, the parameter is the amount of bytes downloaded (also present in the returned stream). An option is to raise an error in this handler as the effect will eventually propagate up to the compiled and executed stream.
+   * @param beginAt     =0 An optional parameter that specifies at what byte to start, useful for resuming a failed download or request partial data.
+   * @param endAt       =None An optional parameter that specifies at what byte to end, useful for requesting the partial representation of an object, if not specified will get the object metadata first to determine the value.
+   * @return A stream of data. This stream might have a raised error in it (for multiple reasons such as api errors or raising one in onFailure.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/get]]
+   */
+  def getObjectChunked[F[_] : Timer](
+                                      item: GCSItem,
+                                      chunkFactor: Long,
+                                      onFailure: Long => F[Unit],
+                                      beginAt: Long = 0,
+                                      endAt: Option[Long] = None
+                                    )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, Chunk[Byte]] = {
     val (uri, m) = ObjectsEndpoints.get(item)
     val chunkSize: Long = chunkFactor * G.baseChunkSize
     val lengthWithFallback: F[Long] = getObjectSizeFallback(item, endAt)
@@ -133,7 +129,7 @@ object Objects {
               if (end == totalEnd - 1) {
                 effect.map {
                   case NotDoneWithBody(_, body) => DoneWithBody(body)
-                  case x                        => x
+                  case x => x
                 }
               } else {
                 effect
@@ -142,7 +138,7 @@ object Objects {
           }
           .takeWhile({
             case _: NotDoneWithBody => true
-            case _                  => false
+            case _ => false
           }, takeFailure = true)
 
         withError
@@ -164,14 +160,16 @@ object Objects {
 
   protected[tray] implicit val byteMonoid: Monoid[Chunk[Byte]] = new Monoid[Chunk[Byte]] {
     override def empty: Chunk[Byte] = Chunk.empty[Byte]
+
     override def combine(x: Chunk[Byte], y: Chunk[Byte]): Chunk[Byte] = Chunk.bytes((x.toVector ++ y.toVector).toArray)
   }
 
   /**
-    * Parallel version of [[getObjectChunked]]
-    *
-    * @param parallelism determines how many requests will be performed in parallel
-    */
+   * Parallel version of [[getObjectChunked]]
+   *
+   * @param parallelism determines how many requests will be performed in parallel
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/get]]
+   */
   def getObjectParallel[F[_] : Timer : Sync : Concurrent](item: GCSItem,
                                                           chunkFactor: Long,
                                                           parallelism: Int,
@@ -197,58 +195,44 @@ object Objects {
           case None => fs2.Stream.empty
         }
         .lift[F]
-        .parEvalMap(parallelism) { case (start, end) => getObjectChunked(item, chunkFactor, onFailure, start, Some(end)).compile.foldMonoid }
+        .parEvalMap(parallelism) { case (start, end) =>
+          getObjectChunked(item, chunkFactor, onFailure, start, Some(end))
+            .compile
+            .foldMonoid
+        }
     }
     fs2.Stream.eval(outF).flatten
   }
 
   /**
-    * Does a "simple" put which uploads the requested object in "one go".
-    *
-    * @param item The bucket/path to upload to.
-    * @param data The data-stream to upload.
-    */
+   * Does a "simple" put which uploads the requested object in "one go".
+   *
+   * @param item The bucket/path to upload to.
+   * @param data The data-stream to upload.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/insert]]
+   */
   def putObject[F[_]](item: GCSItem, data: fs2.Stream[F, Byte])(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
     ObjectsEndpoints.put(item) match {
       case (uri, m) => G.authedRequest(m, uri, data)(GCStorage.raiseEffectfulBadStatus)
     }
 
   /**
-  * Composes GCS objects, more can be found in the official GCS documentation.
-  *
-  * @param destinationObject    The object to copy all source objets to.
-  * @param compose              The compose description. It is a 1:1 representation of the documented json payload.
-  */
-  def compose[F[_]: Sync](destinationObject: GCSItem, compose: Compose)(implicit G: GCStorage[F]): F[Unit] =
-    effectfulReq(composeReq[F](destinationObject, compose))
-
-  def composeBatch[F[_]: Sync](destinationObject: GCSItem, compose: Compose)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
-    effectfulBatch(composeReq[F](destinationObject, compose))
-
-  protected[tray] def composeReq[F[_]](destinationObject: GCSItem, compose: Compose): Prepared[F] = {
-    import fs2.text._
-    import io.circe.generic.auto._
-    import io.circe.syntax._
-    val (uri, m) = ObjectsEndpoints.compose(destinationObject)
-    GCStorage.makeRequest(m, uri, fs2.Stream(compose.asJson.noSpaces).through(utf8Encode), `Content-Type`(MediaType.application.json))
-  }
-
-  /**
-    * Does a parallel upload with the chunking factor determining how much of the stream to be consumed before beginning a new request.
-    *
-    * @param item        The bucket/path to upload to.
-    * @param data        The data-stream to upload.
-    * @param parallelism The number of threads used to perform the upload.
-    * @param chunkFactor The "factor" of size of chunks, Google cloud only allows multiples of 256kb chunks, so this integer will determine the payload size, eg 256kb * chunkFactor.
-    * @param prefix      The prefix is used to name the temporary files created, if the prefix is "tmp" then the elements will be named "tmp-1", "tmp-2"...
-    */
-  def putParallel[F[_]: Concurrent: Sync](
-    item: GCSItem,
-    data: fs2.Stream[F, Byte],
-    parallelism: Int,
-    chunkFactor: Int,
-    prefix: String
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+   * Does a parallel upload with the chunking factor determining how much of the stream to be consumed before beginning a new request.
+   *
+   * @param item        The bucket/path to upload to.
+   * @param data        The data-stream to upload.
+   * @param parallelism The number of threads used to perform the upload.
+   * @param chunkFactor The "factor" of size of chunks, Google cloud only allows multiples of 256kb chunks, so this integer will determine the payload size, eg 256kb * chunkFactor.
+   * @param prefix      The prefix is used to name the temporary files created, if the prefix is "tmp" then the elements will be named "tmp-1", "tmp-2"...
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/insert]]
+ */
+  def putParallel[F[_] : Concurrent : Sync](
+                                             item: GCSItem,
+                                             data: fs2.Stream[F, Byte],
+                                             parallelism: Int,
+                                             chunkFactor: Int,
+                                             prefix: String
+                                           )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val rechunked: fs2.Stream[F, (Chunk[Byte], Long)] =
       data.chunkN(G.baseChunkSize * chunkFactor).zipWithIndex
     val uploaded: fs2.Stream[F, String] =
@@ -267,32 +251,23 @@ object Objects {
       .map(_.map(name => tray.serde.Compose.ComposeItem(name)))
 
     formattedSources.flatMap { items =>
-      import fs2.text._
-      import io.circe.generic.auto._
-      import io.circe.syntax._
-
-      val s =
-        Compose(sourceObjects = items, destination = ComposeDestination(contentType = "application/json")).asJson.noSpaces
-
-      val (uri, m) = ObjectsEndpoints.compose(item)
-
-      G.authedRequest(m, uri, fs2.Stream(s).through(utf8Encode), `Content-Type`(MediaType.application.json))(
-        _ => S.unit
-      )
+      val s = Compose(sourceObjects = items, destination = ComposeDestination(contentType = "application/json"))
+      compose(item, s)
     }
   }
 
   /**
-    * Does a resumable upload, effectively chunking the requests without parallel.
-    * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
-    *
-    * @param item        The bucket/path to upload to.
-    * @param data        The data-stream to upload.
-    * @param chunkFactor The "factor" of size of chunks, Google cloud only allows multiples of 256kb chunks, so this integer will determine the payload size, eg 256kb * chunkFactor.
-    * @param beginAt     =0 An optional offset that specifies if an offset should used as the beginning, useful for resuming partially completed uploads. Note that the stream should only contain the remainder of the upload, eg the caller should drop the beginAt bytes from the original data.
-    * @return An option, if defined contains an indication of a failure and how many bytes were written such that an upload may be resumed.
-    */
-  def putObjectChunked[F[_]: Timer](item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int, beginAt: Long = 0)(
+   * Does a resumable upload, effectively chunking the requests without parallel.
+   * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
+   *
+   * @param item        The bucket/path to upload to.
+   * @param data        The data-stream to upload.
+   * @param chunkFactor The "factor" of size of chunks, Google cloud only allows multiples of 256kb chunks, so this integer will determine the payload size, eg 256kb * chunkFactor.
+   * @param beginAt     =0 An optional offset that specifies if an offset should used as the beginning, useful for resuming partially completed uploads. Note that the stream should only contain the remainder of the upload, eg the caller should drop the beginAt bytes from the original data.
+   * @return An option, if defined contains an indication of a failure and how many bytes were written such that an upload may be resumed.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/insert]]
+ */
+  def putObjectChunked[F[_] : Timer](item: GCSItem, data: fs2.Stream[F, Byte], chunkFactor: Int, beginAt: Long = 0)(
     implicit G: GCStorage[F],
     S: Sync[F]
   ): OptionT[F, Long] = {
@@ -335,7 +310,7 @@ object Objects {
             .lastOr(NotDone(0)) // If there is only one chunk
             .flatMap {
               case failed: FailedAt => fs2.Stream.eval(S.pure(failed))
-              case Done             => fs2.Stream.empty
+              case Done => fs2.Stream.empty
               case NotDone(offset) =>
                 rechunked.last
                   .collect { case Some(x) => x }
@@ -363,12 +338,34 @@ object Objects {
   }
 
   /**
-    * Does a simple delete that runs in one http call.
-    */
-  def delete[F[_]: Sync](item: GCSItem)(implicit G: GCStorage[F]): F[Unit] =
+   * Composes GCS objects, more can be found in the official GCS documentation.
+   *
+   * @param destinationObject The object to copy all source objects to.
+   * @param compose           The compose description. It is a 1:1 representation of the documented json payload.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/compose]]
+   */
+  def compose[F[_] : Sync](destinationObject: GCSItem, compose: Compose)(implicit G: GCStorage[F]): F[Unit] =
+    effectfulReq(composeReq[F](destinationObject, compose))
+
+  def composeBatch[F[_] : Sync](destinationObject: GCSItem, compose: Compose)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+    effectfulBatch(composeReq[F](destinationObject, compose))
+
+  protected[tray] def composeReq[F[_]](destinationObject: GCSItem, compose: Compose): Prepared[F] = {
+    import fs2.text._
+    import io.circe.generic.auto._
+    import io.circe.syntax._
+    val (uri, m) = ObjectsEndpoints.compose(destinationObject)
+    GCStorage.makeRequest(m, uri, fs2.Stream(compose.asJson.noSpaces).through(utf8Encode), `Content-Type`(MediaType.application.json))
+  }
+
+  /**
+   * Performs a delete that runs in one http call.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/delete]]
+   */
+  def delete[F[_] : Sync](item: GCSItem)(implicit G: GCStorage[F]): F[Unit] =
     effectfulReq(deleteReq[F](item))
 
-  def deleteBatch[F[_]: Sync](item: GCSItem)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+  def deleteBatch[F[_] : Sync](item: GCSItem)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
     effectfulBatch(deleteReq[F](item))
 
   protected[tray] def deleteReq[F[_]](item: GCSItem): Prepared[F] = {
@@ -377,15 +374,16 @@ object Objects {
   }
 
   /**
-    * Does a GCS copy that runs in one http call.
-    */
-  def copy[F[_]: Sync](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Unit] =
+   * Performs a server-side GCS copy that runs in one http call.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/copy]]
+   */
+  def copy[F[_] : Sync](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Unit] =
     effectfulReq(copyReq[F](from, to))
 
-  def copyBatch[F[_]: Sync](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+  def copyBatch[F[_] : Sync](from: GCSItem, to: GCSItem)(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
     effectfulBatch(copyReq[F](from, to))
 
-  protected[tray] def copyReq[F[_]: Sync](from: GCSItem, to: GCSItem): Prepared[F] = {
+  protected[tray] def copyReq[F[_] : Sync](from: GCSItem, to: GCSItem): Prepared[F] = {
     val (uri, method) = ObjectsEndpoints.copy(from, to)
     GCStorage.makeRequest[F](method, uri, EmptyBody)
   }
@@ -402,16 +400,16 @@ object Objects {
   }
 
   /**
-    * A listing variant with no field filters.
-    */
+   * A listing variant with no field filters.
+   */
   def listFull[F[_]](bucket: String,
-    listingFilter: ListFilter = ListFilter()
-  )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[ObjectMetadata]] =
+                     listingFilter: ListFilter = ListFilter()
+                    )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[ObjectMetadata]] =
     listGeneric[F, ObjectMetadata](bucket, listingFilter)
 
   /**
-    * A listing variant with field filters and a partial variant.
-    */
+   * A listing variant with field filters and a partial variant.
+   */
   def listPartial[F[_]](bucket: String, listingFilter: ListFilter = ListFilter(), fieldFilter: Seq[String] = Seq.empty)(
     implicit G: GCStorage[F],
     S: Sync[F]
@@ -419,18 +417,18 @@ object Objects {
     listGeneric[F, PartialObjectMetadata](bucket, listingFilter, fieldFilter)
 
   /**
-    * A listing function which takes a circe decoder and applies it, this encoder should correspond to fieldFilter.
-    */
+   * A listing function which takes a circe decoder and applies it, this encoder should correspond to fieldFilter.
+   */
   def listDec[F[_], T: Decoder](
-    bucket: String,
-    listingFilter: ListFilter = ListFilter(),
-    fieldFilter: Seq[String] = Seq.empty
-  )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[T]] =
+                                 bucket: String,
+                                 listingFilter: ListFilter = ListFilter(),
+                                 fieldFilter: Seq[String] = Seq.empty
+                               )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[T]] =
     listGeneric[F, T](bucket, listingFilter, fieldFilter)
 
   /**
-    * Like the decoder flavor of [[listDec]] but returns a map which can be used to find the desired value.
-    */
+   * Like the decoder flavor of [[listDec]] but returns a map which can be used to find the desired value.
+   */
   def listAnon[F[_]](bucket: String, listingFilter: ListFilter = ListFilter(), fieldFilter: Seq[String] = Seq.empty)(
     implicit G: GCStorage[F],
     S: Sync[F]
@@ -438,10 +436,10 @@ object Objects {
     listGeneric[F, Map[String, Json]](bucket, listingFilter, fieldFilter)
 
   private def listGeneric[F[_], T: Decoder](
-    bucket: String,
-    listingFilter: ListFilter,
-    fieldFilter: Seq[String] = Seq.empty
-  )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[T]] = {
+                                             bucket: String,
+                                             listingFilter: ListFilter,
+                                             fieldFilter: Seq[String] = Seq.empty
+                                           )(implicit G: GCStorage[F], S: Sync[F]): fs2.Stream[F, ListingResponse[T]] = {
     val (initialUri, initialMethod) =
       ObjectsEndpoints.list(bucket, listingFilter, None, fieldFilter: _*)
 
@@ -470,8 +468,8 @@ object Objects {
   }
 
   /**
-    * Patches the object metadata.
-    */
+   * Patches the object metadata.
+   */
   def patchJson[F[_]](item: GCSItem, newMetadata: Json)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val (uri, m) = ObjectsEndpoints.patch(item)
 
@@ -481,12 +479,12 @@ object Objects {
   }
 
   /**
-    * Patches the object metadata using a structured parameter.
-    */
+   * Patches the object metadata using a structured parameter.
+   */
   def patchPartial[F[_]](
-    item: GCSItem,
-    newMetadata: PartialObjectMetadata
-  )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+                          item: GCSItem,
+                          newMetadata: PartialObjectMetadata
+                        )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     import io.circe.syntax._
 
     val jo: JsonObject = newMetadata.asJsonObject.toMap.filterNot {
@@ -501,17 +499,18 @@ object Objects {
     r.body.through(utf8Decode).compile.to(List).flatMap { l =>
       import io.circe.parser._
       decode[Rewrite](l.mkString) match {
-        case Left(e)  => S.raiseError[Rewrite](e)
+        case Left(e) => S.raiseError[Rewrite](e)
         case Right(s) => S.pure(s)
       }
     }
   }
 
   /**
-    * Rewrites a source object to a destination object, optionally with some new metadata.
-    *
-    * @returns A stream which evaluates all the rewrite steps.
-    */
+   * Rewrites a source object to a destination object, optionally with some new metadata.
+   *
+   * @returns A stream which evaluates all the rewrite steps.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/rewrite]]
+   */
   def rewrite[F[_]](source: GCSItem, target: GCSItem, newMetadata: PartialObjectMetadata = PartialObjectMetadata())(
     implicit G: GCStorage[F],
     S: Sync[F]
@@ -553,10 +552,15 @@ object Objects {
       .flatMap(x => x)
   }
 
+  /**
+   * Returns a boolean for which true means the object exists, and false meaning it does not.
+   * It queries [[getObjectMetadata]], 404 will mean false and 200 will mean true.
+   */
   protected[tray] def existsReq[F[_]](item: GCSItem): Prepared[F] = {
     val (uri, m) = ObjectsEndpoints.getAlt(item, "json")
     GCStorage.makeRequest[F](m, uri, EmptyBody)
   }
+
   protected[tray] def existsHandler[F[_]](r: Response[F])(implicit S: Sync[F]): F[Boolean] =
     if (!r.status.isSuccess && r.status != Status.NotFound) GCStorage.raiseResponse(r)
     else S.pure(r.status != Status.NotFound)
@@ -566,8 +570,8 @@ object Objects {
 
 
   /**
-    * Does a single http update call to the GCS endpoint with the supplied metadata changes.
-    */
+   * Does a single http update call to the GCS endpoint with the supplied metadata changes.
+   */
   def update[F[_]](item: GCSItem, updateMetadata: UpdateMetadata)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val (uri, m) = ObjectsEndpoints.update(item)
 
@@ -585,8 +589,9 @@ object Objects {
   }
 
   /**
-    *
-    */
+   * Registers a webhook for an object.
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/watchAll]]
+   */
   def watchAll[F[_]](item: GCSItem, watchAll: WatchAll)(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
     val (uri, m) = ObjectsEndpoints.update(item)
 

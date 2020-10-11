@@ -1,0 +1,25 @@
+load("//:third_party.bzl", "importable")
+load("@bazel_skylib//lib:collections.bzl", "collections")
+
+package(default_visibility = ["//visibility:public"])
+
+scala_test(
+    name = "gcs-tests-root",
+    srcs = glob(["*.scala"]),
+    jvm_flags = [
+        "-Xms64m",
+        "-Xmx1024m",
+    ],
+    deps = [
+        "//gcs/src/main/scala/tray/api:gcs-api",
+        "//gcs/src/main/scala/tray/core:gcs-core",
+        "//gcs/src/main/scala/tray/auth:gcs-auth",
+        "//gcs/src/main/scala/tray/serde:gcs-serde",
+    ] + collections.uniq(
+        importable["http4s-core"] +
+        importable["http4s-async-http-client"] +
+        importable["fs2-core"] +
+        importable["cats-effect"] +
+        importable["scalatest"],
+    ),
+)

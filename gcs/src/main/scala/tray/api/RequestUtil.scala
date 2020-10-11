@@ -1,11 +1,33 @@
 package tray.api
 
+import java.util.UUID
+
+import cats.Id
 import cats.effect._
 import fs2.Chunk
 import org.http4s._
+import tray.api.GCStorage.Prepared
+import tray.batch.Batch
 
 object RequestUtil {
   import cats.implicits._
+
+  protected[tray] def beginOffsetRange(begin: Long, endAt: Long, stepSize: Long): fs2.Stream[Id, (Long, Long)] = fs2.Stream.iterate((begin, math.min(begin + stepSize, endAt - 1))){ case (_, prevEnd) =>
+    val offset = prevEnd + 1
+    val start = offset
+    val end = math.min(offset + stepSize, endAt - 1)
+    (start, end)
+  }
+
+
+  protected[tray] def effectfulBatch[F[_] : Sync](p: Prepared[F])(implicit G: GCStorage[F]): F[Batch[Unit, F]] =
+    G.runReader (p) map (r => Batch.make(Map(UUID.randomUUID().toString -> r), Batch.unitR))
+
+  protected[tray] def effectfulReq[F[_] : Sync](p: Prepared[F])(implicit G: GCStorage[F]): F[Unit] =
+    effectfulReqAllowErr(Set.empty)(p)
+
+  protected[tray] def effectfulReqAllowErr[F[_]](sc: Set[Status])(p: Prepared[F])(implicit G: GCStorage[F], S: Sync[F]): F[Unit] =
+    G.runReader (p) flatMap (G authedRequest GCStorage.raiseOnBadStatus(sc) (_ => S.unit))
 
   protected [tray] trait AbstractType
   protected [tray] case object AbstractDone extends AbstractType

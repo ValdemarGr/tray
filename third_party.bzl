@@ -82,8 +82,18 @@ def _get_deps(scalaMinor):
         "0.20.0",
         _modt("google-auth-library-oauth2-http", ("com.google.auth:google.auth.library.credentials", False)),
     )
+    """
+    scalaCheck = "org.scalacheck" %% "scalacheck" % "1.14.3" % Test
+    scalaTestScalaCheckIntegration = "org.scalatestplus" %% "scalatestplus-scalacheck" % "3.1.0.0-RC2" % Test
+    """
+    scalaTest = _deps(
+        scalaMinor,
+        "org.scalatest",
+        "3.1.2",
+        _modt("scalatest"),
+    )
 
-    return dict(rawDeps.items() + catsDeps.items() + http4sDeps.items() + fs2.items() + circe.items() + googleAuth.items() + kindProjector.items())
+    return dict(rawDeps.items() + catsDeps.items() + http4sDeps.items() + fs2.items() + circe.items() + googleAuth.items() + kindProjector.items() + scalaTest.items())
 
 def _mvn_flat(string):
     return "@maven//:" + string.replace(":", "_").replace("-", "_").replace(".", "_")
