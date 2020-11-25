@@ -19,11 +19,12 @@ import tray.core.StorageEndpoints.ObjectsEndpoints
 import scala.collection.immutable.TreeMap
 import scala.collection.{SortedSet, mutable}
 import scala.util.Try
+import cats.data.NonEmptyList
 
 
 /*
   This object represents the Objects section of the GCS api.
-  https://cloud.google.com/storage/docs/json_api/v1#objects
+  [[https://cloud.google.com/storage/docs/json_api/v1#objects]]
 
   All operations that do not carry any raw payload, support batching.
  */
@@ -39,12 +40,12 @@ object Objects {
 
   protected[tray] def getObjectSizeFallback[F[_]](item: GCSItem, endAt: Option[Long])(implicit G: GCStorage[F], S: Sync[F]) =
     OptionT.fromOption[F](endAt).getOrElseF[Long] {
-      val (uriMetadata, mMetadata) =
+      val (uriMetadata, metadata) =
         ObjectsEndpoints.getMetadata(item, "size") // Only query size
 
       import fs2.text._
 
-      (G.authedRequest(mMetadata, uriMetadata, EmptyBody)(
+      (G.authedRequest(metadata, uriMetadata, EmptyBody)(
         r => r.body.through(utf8Decode).compile.toList.map(_.mkString)
       ))
         .flatMap { str =>
@@ -83,9 +84,6 @@ object Objects {
    * Does a resumable upload, effectively chunking the requests. It is not parallel.
    * This function ensures that uploading the next chunk is based on the previous' amount of accepted bytes (by the api).
    *
-   * Getting should not be done in parallel, since it requires the previous result's range header to determine the next offset.
-   * If parallelism is wished for, once should instead create a stream of [0-99, 100-199, 200-299...], then request the objects using either of the two get methods by using something like [[fs2.Stream.parEvalMapUnordered]].
-   *
    * @param item        The bucket/path to upload to.
    * @param chunkFactor The "factor" of size of chunks such that 256kb sized chunks will be downloaded, so this integer will determine the payload size, eg 256kb * chunkFactor.
    * @param onFailure   The handler for failures, the parameter is the amount of bytes downloaded (also present in the returned stream). An option is to raise an error in this handler as the effect will eventually propagate up to the compiled and executed stream.
@@ -105,8 +103,19 @@ object Objects {
     val chunkSize: Long = chunkFactor * G.baseChunkSize
     val lengthWithFallback: F[Long] = getObjectSizeFallback(item, endAt)
 
+    /*val _ = lengthWithFallback.flatMap{ totalEnd =>
+      val _ = fs2.Stream.iterateEval(beginAt -> Chunk.empty[Byte]) { case (offset, _) =>
+        val end = math.min(offset + chunkSize, totalEnd - 1)
+        val h = G.rangeHeader(offset, end)
+        val effect = doBackoffRangedRequest[OffsetWithBody, F](m, uri, EmptyBody, start, h): F[OffsetWithBody]
+        ???
+      }
+
+      ???
+    }
+*/
     val firstRequest: F[(OffsetWithBody, Long)] = lengthWithFallback.flatMap { end =>
-      val h = G.rangeHeader(beginAt, math.min(chunkSize, end))
+      val h = G.rangeHeader(beginAt, math.min(beginAt + chunkSize, end))
       doBackoffRangedRequest[OffsetWithBody, F](m, uri, EmptyBody, beginAt, h)
         .map(r => r -> end)
     }
@@ -119,9 +128,9 @@ object Objects {
             case _: DoneWithBody =>
               S.raiseError[OffsetWithBody](new Exception("Did not terminate when done with body")): F[OffsetWithBody]
             case NotDoneWithBody(offset, _) => {
-
               val start = offset
               val end = math.min(offset + chunkSize, totalEnd - 1)
+              println(s"s $start e $end te $totalEnd o $offset")
 
               val h = G.rangeHeader(start, end)
               val effect = doBackoffRangedRequest[OffsetWithBody, F](m, uri, EmptyBody, start, h): F[OffsetWithBody]
@@ -185,17 +194,9 @@ object Objects {
 
       // Instead of doing n=chunks chunked requests we do k=parallelism requests of k/n chunks
       fs2.Stream(rangesF: _*)
-        .chunkN(((beginAt - lwf) / parallelism).toInt)
-        .map(chunks => for {
-          firstStart <- chunks.head.map { case (start, _) => start }
-          lastEnd <- chunks.last.map { case (_, end) => end }
-        } yield (firstStart, lastEnd))
-        .flatMap {
-          case Some(x) => fs2.Stream(x)
-          case None => fs2.Stream.empty
-        }
         .lift[F]
         .parEvalMap(parallelism) { case (start, end) =>
+          println(s"s $start e $end")
           getObjectChunked(item, chunkFactor, onFailure, start, Some(end))
             .compile
             .foldMonoid
@@ -232,7 +233,7 @@ object Objects {
                                              parallelism: Int,
                                              chunkFactor: Int,
                                              prefix: String
-                                           )(implicit G: GCStorage[F], S: Sync[F]): F[Unit] = {
+                                           )(implicit G: GCStorage[F]): F[Unit] = {
     val rechunked: fs2.Stream[F, (Chunk[Byte], Long)] =
       data.chunkN(G.baseChunkSize * chunkFactor).zipWithIndex
     val uploaded: fs2.Stream[F, String] =
@@ -304,7 +305,7 @@ object Objects {
                     doBackoffRangedRequest[OffsetWithoutBody, F](m, uri, fs2.Stream.chunk(bytes), start, h)
                 }
             }
-            .evalMap(x => x)
+            .evalMap(identity)
 
           val combined: fs2.Stream[F, OffsetWithoutBody] = completedFirsts
             .lastOr(NotDone(0)) // If there is only one chunk
@@ -556,18 +557,12 @@ object Objects {
    * Returns a boolean for which true means the object exists, and false meaning it does not.
    * It queries [[getObjectMetadata]], 404 will mean false and 200 will mean true.
    */
-  protected[tray] def existsReq[F[_]](item: GCSItem): Prepared[F] = {
-    val (uri, m) = ObjectsEndpoints.getAlt(item, "json")
-    GCStorage.makeRequest[F](m, uri, EmptyBody)
-  }
+  def exists[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Boolean] =
+    G runReader metadataReq[F](item) flatMap (G authedRequest existsHandler[F])
 
   protected[tray] def existsHandler[F[_]](r: Response[F])(implicit S: Sync[F]): F[Boolean] =
     if (!r.status.isSuccess && r.status != Status.NotFound) GCStorage.raiseResponse(r)
     else S.pure(r.status != Status.NotFound)
-
-  def exists[F[_]](item: GCSItem)(implicit G: GCStorage[F], S: Sync[F]): F[Boolean] =
-    G runReader existsReq[F](item) flatMap (G authedRequest existsHandler[F])
-
 
   /**
    * Does a single http update call to the GCS endpoint with the supplied metadata changes.
@@ -603,4 +598,26 @@ object Objects {
 
     G.authedRequest(m, uri, dataStream)(_ => S.unit)
   }
+
+  /* Gets the metadata for an object
+   * [[https://cloud.google.com/storage/docs/json_api/v1/objects/get]]
+   * */
+  def metadataReq[F[_]](item: GCSItem): Prepared[F] = {
+    val (uri, m) = ObjectsEndpoints.getAlt(item, "json")
+    GCStorage.makeRequest[F](m, uri, EmptyBody)
+  }
+
+  protected[tray] def metadataHandler[F[_]](res: Response[F])(implicit S: Sync[F]): F[PartialObjectMetadata] =  {
+    import fs2.text._
+    res.body.through(utf8Decode).compile.to(List).flatMap{ s => 
+      import io.circe.parser._
+      decode[PartialObjectMetadata](s.mkString) match {
+        case Left(e) => S.raiseError[PartialObjectMetadata](e)
+        case Right(s) => S.pure(s)
+      }
+    }
+  }
+
+  def metadata[F[_]: Sync](item: GCSItem)(implicit G: GCStorage[F]): F[PartialObjectMetadata] =
+    G runReader metadataReq[F](item) flatMap (G authedRequest (x => metadataHandler(x)))
 }

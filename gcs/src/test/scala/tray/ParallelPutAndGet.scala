@@ -11,6 +11,8 @@ import cats.effect._
 import fs2.Chunk
 
 import scala.concurrent.{ExecutionContext, Future}
+import java.security.MessageDigest
+import tray.serde.PartialObjectMetadata
 
 class ParallelPutAndGet extends AsyncFunSuite {
   implicit val timer: Timer[IO] = IO.timer(executionContext)
@@ -29,7 +31,7 @@ class ParallelPutAndGet extends AsyncFunSuite {
   val tempNames = fs2.Stream(0 until n).map(i => prefix + s"-${i}").map(name => GCSItem(bucket, name))
   val allNames = fs2.Stream(GCSItem(bucket, outName)) ++ tempNames
   val pureD = "abcdefg hellooooo i am data :).." // 32
-  val mulOneKb = (pureD * 2 * 16 /*=1024*/)
+  val mulOneKb = (pureD * 2 * 16 /*=1024*/ )
   val mulOneMb = (mulOneKb * 1024)
   val asBytes = mulOneMb.getBytes(StandardCharsets.UTF_8)
   val data = fs2.Stream(asBytes: _*)
@@ -39,16 +41,31 @@ class ParallelPutAndGet extends AsyncFunSuite {
     succ(eff)
   }
 
-  test("puts the data chunks in parallel") {
+  test(s"puts ${asBytes.size} bytes of data in parallel") {
     val eff = Objects.putParallel[IO](GCSItem(bucket, outName), data, n, 1, prefix)
+    //val eff = Objects.putObject[IO](GCSItem(bucket, outName), data)
     succ(eff)
   }
 
-  test("gets the data chunks in parallel") {
-    val outData: fs2.Stream[IO, Chunk[Byte]] = Objects.getObjectParallel[IO](GCSItem(bucket, outName), 1, n, _ => IO.raiseError(new Exception("failed to upload")))
-    val sIO = outData.through(utf8DecodeC).compile.fold(""){ case (a, b) => a ++ b }
+  test(s"verifies that size is ${asBytes.size}") {
+    val s: IO[PartialObjectMetadata] = Objects.metadata[IO](GCSItem(bucket, outName))
 
-    val eff = sIO.map(s => s should be(mulOneMb))
+    val out = s.map{om => om.size.get should be(asBytes.length)}
+    succ(out)
+  }
+
+  test("gets the data chunks in parallel") {
+    val outData: fs2.Stream[IO, Chunk[Byte]] = Objects
+      .getObjectParallel[IO](GCSItem(bucket, outName), 1, n, _ => IO.raiseError(new Exception("failed to upload"))).map{ c => println(c.size);c }
+     //val outData = fs2.Stream.eval(Objects.getObject[IO](GCSItem(bucket, outName)).map(ab => Chunk.array(ab)))
+    val sIO = outData.through(utf8DecodeC).compile.fold("") { case (a, b) => a ++ b }
+
+    def md5(s: String) = new String(MessageDigest.getInstance("MD5").digest(s.getBytes), StandardCharsets.UTF_8)
+
+    val eff = sIO.map { s =>
+      val _ = s.length should be(mulOneMb.length)
+      md5(s) should be(md5(mulOneMb))
+    }
     succ(eff)
   }
 

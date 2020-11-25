@@ -1,6 +1,6 @@
 load("@rules_jvm_external//:defs.bzl", "maven_install")
 load("@rules_jvm_external//:specs.bzl", "maven", "parse")
-load("//:scala_version.bzl", "scala_major", "scala_minor")
+load("//:scala_version.bzl", "scala_major", "scala_minor", "artifact_version")
 
 def _make_dep(scalaMinor, group, module, ver):
     return {
@@ -36,6 +36,25 @@ def _modt(module, *transitive):
         "module": module,
         "transitive": [(t + "_" + scala_major + ".{}".format(scala_minor) if scalaArtifact else t) for t, scalaArtifact in transitive],
     }
+
+def _dependency(group, name, version):
+    art = parse.parse_maven_coordinate(group + ":" + name + ":" + version)
+    return maven.artifact(
+        group =  art['group'],
+        artifact = art['artifact'],
+        packaging =  art.get('packaging'),
+        classifier = art.get('classifier'),
+        version =  art['version'],
+        exclusions = None,
+    )
+
+def _scala_dependency(group, name, version):
+    return _dependency(group, name + "_" + artifact_version, version)
+
+deplist = [
+        _scala_dependency("org.scalacheck", "scalacheck", "1.14.3"),
+        _scala_dependency("org.scalatestplus", "scalatestplus-scalacheck", "3.1.0.0-RC2"),
+        ]
 
 def _get_deps(scalaMinor):
     rawDeps = {}
@@ -83,8 +102,6 @@ def _get_deps(scalaMinor):
         _modt("google-auth-library-oauth2-http", ("com.google.auth:google.auth.library.credentials", False)),
     )
     """
-    scalaCheck = "org.scalacheck" %% "scalacheck" % "1.14.3" % Test
-    scalaTestScalaCheckIntegration = "org.scalatestplus" %% "scalatestplus-scalacheck" % "3.1.0.0-RC2" % Test
     """
     scalaTest = _deps(
         scalaMinor,
@@ -113,7 +130,7 @@ def dependencies():
     deps = _get_deps(scala_minor)
     asMvn = [_to_maven(dep) for _, dep in deps.items()]
     maven_install(
-        artifacts = asMvn,
+        artifacts = asMvn + deplist,
         repositories = [
             "https://repo.maven.apache.org/maven2/",
             "https://mvnrepository.com/artifact",

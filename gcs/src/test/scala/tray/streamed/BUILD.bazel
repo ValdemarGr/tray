@@ -1,17 +1,20 @@
 load("//:third_party.bzl", "importable")
+load("//:scala_version.bzl", "add_scala_ver")
 load("@bazel_skylib//lib:collections.bzl", "collections")
 
 package(default_visibility = ["//visibility:public"])
 
 scala_test(
-    name = "gcs-tests-root",
+    name = "gcs-tests-streamed",
     srcs = glob(["*.scala"]),
     deps = [
         "//gcs/src/main/scala/tray/api:gcs-api",
         "//gcs/src/main/scala/tray/core:gcs-core",
         "//gcs/src/main/scala/tray/auth:gcs-auth",
         "//gcs/src/main/scala/tray/serde:gcs-serde",
-        "//gcs/src/test/scala/tray/streamed:gcs-tests-streamed",
+        "@maven//:org_scalactic_scalactic_2_12",
+        add_scala_ver("@maven//:org_scalacheck_scalacheck"),
+        add_scala_ver("@maven//:org_scalatestplus_scalatestplus_scalacheck"),
     ] + collections.uniq(
         importable["http4s-core"] +
         importable["http4s-async-http-client"] +
