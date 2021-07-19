@@ -6,6 +6,11 @@ scala_library(
     srcs = glob(["*.scala"]),
     visibility = ["//visibility:public"],
     deps = [
-        "//src/main/scala/tray/auth"
+        add_scala_ver("@maven//:org_http4s_http4s_core"),
+        add_scala_ver("@maven//:org_http4s_http4s_dsl"),
+        add_scala_ver("@maven//:org_http4s_http4s_client"),
+
+        "//src/main/scala/tray/auth",
+        "//src/main/scala/tray/endpoints",
     ],
 )

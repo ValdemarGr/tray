@@ -1,0 +1,24 @@
+load("//:dependencies.bzl", "add_scala_ver")
+load("@io_bazel_rules_scala//scala:scala.bzl", "scala_library")
+
+scala_library(
+    name = "endpoints",
+    srcs = glob(["*.scala"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        #cats
+        add_scala_ver("@maven//:org_typelevel_cats_kernel"),
+        add_scala_ver("@maven//:org_typelevel_cats_core"),
+        add_scala_ver("@maven//:org_typelevel_cats_parse"),
+
+        #fs2
+        add_scala_ver("@maven//:co_fs2_fs2_core"),
+
+        #https
+        add_scala_ver("@maven//:org_http4s_http4s_core"),
+        add_scala_ver("@maven//:org_http4s_http4s_dsl"),
+        add_scala_ver("@maven//:org_typelevel_literally"),
+        add_scala_ver("@maven//:com_comcast_ip4s_core"),
+        add_scala_ver("@maven//:org_typelevel_case_insensitive"),
+    ],
+)

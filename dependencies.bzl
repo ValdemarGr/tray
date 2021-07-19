@@ -7,6 +7,18 @@ scala_versions = make_scala_versions(
 )
 
 project_deps = [
+    #http4s
+    scala_dependency("org.http4s", "http4s-core", "1.0.0-M20"),
+    scala_dependency("org.http4s", "http4s-client", "1.0.0-M20"),
+    scala_dependency("org.http4s", "http4s-dsl", "1.0.0-M20"),
+    scala_dependency("org.http4s", "http4s-client", "1.0.0-M20"),
+
+    #CE
+    scala_dependency("org.typelevel", "cats-effect", "3.1.1"),
+
+    #google
+    java_dependency("com.google.auth", "google-auth-library-oauth2-http", "0.27.0"),
+    java_dependency("com.google.auth", "google-auth-library-credentials", "0.27.0")
 ]
 
 def add_scala_ver(s):
