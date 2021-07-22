@@ -12,6 +12,10 @@ scala_library(
         add_scala_ver("@maven//:org_typelevel_cats_effect_kernel"),
         add_scala_ver("@maven//:org_typelevel_cats_effect"),
 
+        #http4s
+        add_scala_ver("@maven//:org_http4s_http4s_core"),
+        add_scala_ver("@maven//:org_typelevel_case_insensitive"),
+
         # GCS
         "@maven//:com_google_auth_google_auth_library_oauth2_http",
         "@maven//:com_google_auth_google_auth_library_credentials",

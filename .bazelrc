@@ -1,2 +1,4 @@
 build --strategy=Scalac=worker
 build --worker_sandboxing
+test --java_runtime_version=remotejdk_11
+run --java_runtime_version=remotejdk_11

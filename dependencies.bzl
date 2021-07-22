@@ -7,11 +7,16 @@ scala_versions = make_scala_versions(
 )
 
 project_deps = [
+    #testing
+    scala_dependency("org.scalameta", "munit", "0.7.27"),
+    scala_dependency("org.typelevel", "munit-cats-effect-3", "1.0.5"),
+
     #http4s
     scala_dependency("org.http4s", "http4s-core", "1.0.0-M20"),
     scala_dependency("org.http4s", "http4s-client", "1.0.0-M20"),
     scala_dependency("org.http4s", "http4s-dsl", "1.0.0-M20"),
     scala_dependency("org.http4s", "http4s-client", "1.0.0-M20"),
+    scala_dependency("org.http4s", "http4s-jdk-http-client", "0.5.0-M4"),
 
     #CE
     scala_dependency("org.typelevel", "cats-effect", "3.1.1"),

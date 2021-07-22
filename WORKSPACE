@@ -28,10 +28,10 @@ rules_proto_dependencies()
 rules_proto_toolchains()
 
 # dependencies
-commitSha = "a7a873fa65df4d6b7f6a00cde5a18650e2ed1748"
+commitSha = "e48fe88ef733f71ab780b196bb65f6c803662fdf"
 http_archive(
     name = "scala_things",
-    sha256 = "2d09d2cf89fa44b7cbd94851ae1c800ebf358719e79cea6fae33708a723697d5",
+    # sha256 = "5ecc4779aa907f050f01ec42daad87164e5b1ed3858b7bf18cce2e1afc0afd87",
     strip_prefix = "bazel-things-%s" % commitSha,
     url = "https://github.com/valdemargr/bazel-things/archive/%s.zip" % commitSha,
 )

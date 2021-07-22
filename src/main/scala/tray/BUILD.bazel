@@ -6,11 +6,22 @@ scala_library(
     srcs = glob(["*.scala"]),
     visibility = ["//visibility:public"],
     deps = [
+        #fs2
+        add_scala_ver("@maven//:co_fs2_fs2_core"),
+
+        #CE
+        add_scala_ver("@maven//:org_typelevel_cats_kernel"),
+        add_scala_ver("@maven//:org_typelevel_cats_core"),
+        add_scala_ver("@maven//:org_typelevel_cats_effect_kernel"),
+        add_scala_ver("@maven//:org_typelevel_cats_effect"),
+
+        #http4s
         add_scala_ver("@maven//:org_http4s_http4s_core"),
-        add_scala_ver("@maven//:org_http4s_http4s_dsl"),
         add_scala_ver("@maven//:org_http4s_http4s_client"),
+        add_scala_ver("@maven//:org_typelevel_vault"),
 
         "//src/main/scala/tray/auth",
         "//src/main/scala/tray/endpoints",
+        "//src/main/scala/tray/errors",
     ],
 )
