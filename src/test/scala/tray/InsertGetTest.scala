@@ -13,31 +13,41 @@ class InsertGetTest extends CatsEffectSuite {
   import cats.implicits._
 
   val element = "InsertGetTest_element"
+  val element2 = "InsertGetTest_element2"
   val clientFixture = ResourceSuiteLocalFixture(
     "storage_client",
-    JdkHttpClient.simple[IO].map { client =>
+    JdkHttpClient.simple[IO].evalMap { client =>
       GCSAuth[IO].map(auth => BlobStore[IO](auth, client))
     }
   )
 
   override def munitFixtures = List(clientFixture)
-  val sp = StoragePath(element, "os-valdemar")
 
   test(s"should insert an object by name $element") {
-    clientFixture().map(_.putBlob(sp, element.getBytes(StandardCharsets.UTF_8)))
+    clientFixture().putBlob(StoragePath(element, "os-valdemar"), element.getBytes(StandardCharsets.UTF_8))
   }
 
-  test(s"should get the inserted object by name $element") {
-    val stringF: IO[String] = clientFixture()
-      .flatMap(_.getBlob(sp).use(_.compile.to(Array)))
-      .map(bytes => new String(bytes, StandardCharsets.UTF_8))
-    assertIO(stringF, element)
-  }
+  def getTest(name: String) =
+    test(s"should get the inserted object by name $name") {
+      val bs = clientFixture()
+
+      val stringF: IO[String] = bs
+        .getBlob(StoragePath(name, "os-valdemar"))
+        .use(_.compile.to(Array))
+        .map(bytes => new String(bytes, StandardCharsets.UTF_8))
+
+      assertIO(stringF, name)
+    }
+
+  getTest(element)
 
   test(s"should upload resumable") {
-    clientFixture().flatMap{ bs =>
-      val bytes = fs2.Stream(element.getBytes().toList : _*).lift[IO]
-      bytes.through(bs.putResumable(StoragePath("der er hest i den", "os-valdemar"))).compile.drain
-    }
+    val bytes = fs2.Stream(element2.getBytes().toList: _*).lift[IO]
+    bytes
+      .through(clientFixture().putResumable(StoragePath(element2, "os-valdemar"), chunkSize = 4))
+      .compile
+      .drain
   }
+
+  getTest(element2)
 }
