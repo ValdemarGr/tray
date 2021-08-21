@@ -16,9 +16,11 @@ import org.http4s.headers._
 import cats.effect.kernel.Resource
 
 trait BlobStore[F[_]] {
-  def insert(path: StoragePath, bytes: Array[Byte]): F[Unit]
+  def putBlob(path: StoragePath, contentType: MediaType, bytes: Array[Byte]): F[Unit]
 
-  def get(path: StoragePath): Resource[F, Stream[F, Byte]]
+  def putPipe(path: StoragePath, contentType: MediaType, length: Long): Pipe[F, Byte, Unit]
+
+  def getBlob(path: StoragePath): Resource[F, Stream[F, Byte]]
 }
 
 object BlobStore {
@@ -31,32 +33,41 @@ object BlobStore {
             Concurrent[F].raiseError(new TrayError.HttpStatusError(s"tray response had bad status code: $res\n$body"))
           }
 
-      def insert(path: StoragePath, bytes: Array[Byte]): F[Unit] =
-        for {
-          headers <- auth.getHeader
-          _ <-
-            client
+      def putBlob(path: StoragePath, contentType: MediaType, bytes: Array[Byte]): F[Unit] =
+        Stream.chunk[F, Byte](Chunk.array(bytes))
+          .through(putPipe(path, contentType, bytes.length.toLong))
+          .compile
+          .drain
+
+      def putPipe(path: StoragePath, contentType: MediaType, length: Long): Pipe[F, Byte, Unit] = { stream =>
+        val eff =
+          for {
+            headers <- auth.getHeader
+            _ <- client
               .run(
                 Request[F](
                   method = Method.POST,
-                  uri =
-                    Endpoints.upload / "b" / path.bucket / "o" +? ("name", path.path.renderString) +? ("uploadType", "media"),
-                  body = Stream.chunk(Chunk.array(bytes)),
-                  headers = Headers(`Content-Type`(MediaType.application.json), `Content-Length`(bytes.size)) ++ headers
+                  uri = Endpoints.upload / "b" / path.bucket / "o" +? ("name", path.path) +? ("uploadType", "media"),
+                  body = stream,
+                  headers = Headers(`Content-Type`(contentType), `Content-Length`(length)) ++ headers
                 )
               )
               .use(failOnNonSuccess)
               .void
-        } yield ()
+          } yield ()
 
-      def get(path: StoragePath): Resource[F, Stream[F, Byte]] =
+        Stream.eval(eff)
+      }
+
+      //https://cloud.google.com/storage/docs/json_api/v1/objects/get
+      def getBlob(path: StoragePath): Resource[F, Stream[F, Byte]] =
         for {
           headers <- Resource.eval(auth.getHeader)
           out <- client
             .run(
               Request[F](
                 method = Method.GET,
-                uri = Endpoints.basic / "b" / path.bucket / "o" / path.path.renderString +? ("alt", "media"),
+                uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "media"),
                 headers = headers
               )
             )

@@ -3,6 +3,6 @@ package tray
 import org.http4s.Uri
 
 final case class StoragePath(
-  path: Uri.Path,
+  path: String,
   bucket: String
 )

@@ -7,6 +7,7 @@ import cats.effect.IO
 import tray.auth.GCSAuth
 import org.http4s.Uri
 import java.nio.charset.StandardCharsets
+import org.http4s.MediaType
 
 class InsertGetTest extends CatsEffectSuite {
   import cats.implicits._
@@ -20,14 +21,16 @@ class InsertGetTest extends CatsEffectSuite {
   )
 
   override def munitFixtures = List(clientFixture)
-  val sp = StoragePath(Uri.Path.unsafeFromString(element), "os-valdemar")
+  val sp = StoragePath(element, "os-valdemar")
 
   test(s"should insert an object by name $element") {
-    clientFixture().map(_.insert(sp, element.getBytes(StandardCharsets.UTF_8)))
+    clientFixture().map(_.putBlob(sp, MediaType.application.`octet-stream`, element.getBytes(StandardCharsets.UTF_8)))
   }
 
   test(s"should get the inserted object by name $element") {
-    val stringF: IO[String] = clientFixture().flatMap(_.get(sp).use(_.compile.to(Array))).map(bytes => new String(bytes, StandardCharsets.UTF_8))
+    val stringF: IO[String] = clientFixture()
+      .flatMap(_.getBlob(sp).use(_.compile.to(Array)))
+      .map(bytes => new String(bytes, StandardCharsets.UTF_8))
     assertIO(stringF, element)
   }
 }
