@@ -8,6 +8,7 @@ import tray.auth.GCSAuth
 import org.http4s.Uri
 import java.nio.charset.StandardCharsets
 import org.http4s.MediaType
+import org.http4s.headers.Location
 
 class InsertGetTest extends CatsEffectSuite {
   import cats.implicits._
@@ -43,10 +44,15 @@ class InsertGetTest extends CatsEffectSuite {
 
   test(s"should upload resumable") {
     val bytes = fs2.Stream(element2.getBytes().toList: _*).lift[IO]
-    bytes
+    val runEff: IO[Option[(Throwable, Location, Long)]] = bytes
       .through(clientFixture().putResumable(StoragePath(element2, "os-valdemar"), chunkSize = 4))
       .compile
-      .drain
+      .last
+
+    runEff.flatMap{
+      case None => IO.unit
+      case Some((t, _, _)) => IO.raiseError(t)
+    }
   }
 
   getTest(element2)
