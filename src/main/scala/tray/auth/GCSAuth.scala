@@ -6,27 +6,31 @@ import com.google.auth.oauth2.AccessToken
 import org.http4s._
 import org.http4s.headers._
 
-abstract class GCSAuth[F[_]: Sync](underlying: GoogleCredentials) {
-  // We do not trust google
-  import cats.implicits._
-  val getToken: F[AccessToken] =
-    for {
-      _ <- Sync[F].blocking(underlying.refreshIfExpired())
-      token <- Sync[F].blocking(underlying.getAccessToken())
-    } yield token
+trait GCSAuth[F[_]] {
+  val getToken: F[AccessToken] 
 
-  val getHeader: F[Headers] =
-    getToken
-      .map(token => Credentials.Token(AuthScheme.Bearer, token.getTokenValue()))
-      .map(token => Headers(Authorization(token)))
+  val getHeader: F[Headers] 
 }
 
 object GCSAuth {
-  def apply[F[_]: Sync](credentials: GoogleCredentials): GCSAuth[F] = new GCSAuth[F](credentials) {}
+  def apply[F[_]: Sync](credentials: GoogleCredentials): GCSAuth[F] = new GCSAuth[F] {
+    // We do not trust google
+    import cats.implicits._
+    val getToken: F[AccessToken] =
+      for {
+        _ <- Sync[F].blocking(credentials.refreshIfExpired())
+        token <- Sync[F].blocking(credentials.getAccessToken())
+      } yield token
+
+    val getHeader: F[Headers] =
+      getToken
+        .map(token => Credentials.Token(AuthScheme.Bearer, token.getTokenValue()))
+        .map(token => Headers(Authorization(token)))
+  }
 
   import cats.implicits._
   def apply[F[_]: Sync]: F[GCSAuth[F]] =
     Sync[F]
       .blocking(GoogleCredentials.getApplicationDefault())
-      .map(credentials => new GCSAuth[F](credentials) {})
+      .map(credentials => GCSAuth[F](credentials))
 }
