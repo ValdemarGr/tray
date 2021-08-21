@@ -1,7 +1,7 @@
 package tray
 
 import munit.CatsEffectSuite
-import tray.Objects
+import tray.BlobStore
 import org.http4s.client.jdkhttpclient.JdkHttpClient
 import cats.effect.IO
 import tray.auth.GCSAuth
@@ -15,9 +15,10 @@ class InsertGetTest extends CatsEffectSuite {
   val clientFixture = ResourceSuiteLocalFixture(
     "storage_client",
     JdkHttpClient.simple[IO].map { client =>
-      GCSAuth[IO].map(auth => Objects[IO](auth, client))
+      GCSAuth[IO].map(auth => BlobStore[IO](auth, client))
     }
   )
+
   override def munitFixtures = List(clientFixture)
   val sp = StoragePath(Uri.Path.unsafeFromString(element), "os-valdemar")
 

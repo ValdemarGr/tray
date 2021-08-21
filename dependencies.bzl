@@ -26,8 +26,5 @@ project_deps = [
     java_dependency("com.google.auth", "google-auth-library-credentials", "0.27.0")
 ]
 
-def add_scala_ver(s):
-    return apply_scala_version(scala_versions, s)
-
 def add_scala_fullver(s):
     return apply_scala_fullver_version(scala_versions, s)

@@ -1,5 +1,4 @@
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_junit_test")
-load("//:dependencies.bzl", "add_scala_ver")
 
 scala_junit_test(
     name = "tray",
@@ -7,30 +6,28 @@ scala_junit_test(
     suffixes = ["Test"],
     deps = [
         #CE
-        add_scala_ver("@maven//:org_typelevel_cats_kernel"),
-        add_scala_ver("@maven//:org_typelevel_cats_core"),
-        add_scala_ver("@maven//:org_typelevel_cats_effect_kernel"),
-        add_scala_ver("@maven//:org_typelevel_cats_effect"),
-        add_scala_ver("@maven//:org_typelevel_cats_effect_std"),
+        "@maven//:org_typelevel_cats_kernel_2_13",
+        "@maven//:org_typelevel_cats_core_2_13",
+        "@maven//:org_typelevel_cats_effect_kernel_2_13",
+        "@maven//:org_typelevel_cats_effect_2_13",
+        "@maven//:org_typelevel_cats_effect_std_2_13",
 
         #fs2
-        add_scala_ver("@maven//:co_fs2_fs2_core"),
-        add_scala_ver("@maven//:org_scodec_scodec_bits"),
+        "@maven//:co_fs2_fs2_core_2_13",
+        "@maven//:org_scodec_scodec_bits_2_13",
 
         #http4s
-        add_scala_ver("@maven//:org_http4s_http4s_jdk_http_client"),
-        add_scala_ver("@maven//:org_http4s_http4s_core"),
-        add_scala_ver("@maven//:org_http4s_http4s_client"),
-        add_scala_ver("@maven//:org_typelevel_vault"),
+        "@maven//:org_http4s_http4s_jdk_http_client_2_13",
+        "@maven//:org_http4s_http4s_core_2_13",
+        "@maven//:org_http4s_http4s_client_2_13",
 
         #munit
-        add_scala_ver("@maven//:org_scalameta_munit"),
-        add_scala_ver("@maven//:org_typelevel_munit_cats_effect_3"),
+        "@maven//:org_scalameta_munit_2_13",
+        "@maven//:org_typelevel_munit_cats_effect_3_2_13",
 
         # GCS
         "@maven//:com_google_auth_google_auth_library_oauth2_http",
         "@maven//:com_google_auth_google_auth_library_credentials",
-
         "//src/main/scala/tray",
         "//src/main/scala/tray/auth",
     ],
