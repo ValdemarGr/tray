@@ -1,10 +1,10 @@
 build --strategy=Scalac=worker
 build --worker_sandboxing
-build --google_default_credentials
-build --remote_cache=https://storage.googleapis.com/casehub-bazel-build-cache
 build --disk_cache=~/.cache/bazelcache
 
 build --host_javabase=@bazel_tools//tools/jdk:remote_jdk11 
 build --javabase=@bazel_tools//tools/jdk:remote_jdk11
 test --host_javabase=@bazel_tools//tools/jdk:remote_jdk11 
 test --javabase=@bazel_tools//tools/jdk:remote_jdk11
+
+

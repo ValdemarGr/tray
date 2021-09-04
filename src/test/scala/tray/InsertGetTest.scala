@@ -13,8 +13,8 @@ import org.http4s.headers.Location
 class InsertGetTest extends CatsEffectSuite {
   import cats.implicits._
 
-  val element = "InsertGetTest_element"
-  val element2 = "InsertGetTest_element2"
+  val elementF = TestUtil.randomStoragePath.memoize.unsafeRunSync()
+  val element2F = TestUtil.randomStoragePath.memoize.unsafeRunSync()
   val clientFixture = ResourceSuiteLocalFixture(
     "storage_client",
     JdkHttpClient.simple[IO].evalMap { client =>
@@ -24,36 +24,61 @@ class InsertGetTest extends CatsEffectSuite {
 
   override def munitFixtures = List(clientFixture)
 
-  test(s"should insert an object by name $element") {
-    clientFixture().putBlob(StoragePath(element, "os-valdemar"), element.getBytes(StandardCharsets.UTF_8))
-  }
-
-  def getTest(name: String) =
-    test(s"should get the inserted object by name $name") {
+  def getTest(nameF: IO[String]) =
+    test(s"should get the inserted object") {
       val bs = clientFixture()
 
-      val stringF: IO[String] = bs
-        .getBlob(StoragePath(name, "os-valdemar"))
-        .use(_.compile.to(Array))
-        .map(bytes => new String(bytes, StandardCharsets.UTF_8))
-
-      assertIO(stringF, name)
+      for {
+        bucket <- TestUtil.testBucket
+        name <- nameF
+        string <- bs
+          .getBlob(StoragePath(name, bucket))
+          .use(_.compile.to(Array))
+          .map(bytes => new String(bytes, StandardCharsets.UTF_8))
+      } yield assertEquals(string, name)
     }
 
-  getTest(element)
+  test(s"should insert an object") {
+    for {
+      bucket <- TestUtil.testBucket
+      element <- elementF
+      _ <- clientFixture().putBlob(element, element.path.getBytes(StandardCharsets.UTF_8))
+    } yield ()
+  }
+
+  getTest(elementF.map(_.path))
+
+  val elemChunkedF: IO[StoragePath] = TestUtil.randomStoragePath.memoize.unsafeRunSync()
+  test(s"should insert an object chunked encoding") {
+    for {
+      bucket <- TestUtil.testBucket
+      elementChunked <- elemChunkedF
+      data = fs2.Stream.chunk(fs2.Chunk.array(elementChunked.path.getBytes(StandardCharsets.UTF_8))).lift[IO]
+      _ <- data.through(clientFixture().putPipeChunked(elementChunked)).compile.drain
+    } yield ()
+  }
+
+  getTest(elemChunkedF.map(_.path))
 
   test(s"should upload resumable") {
-    val bytes = fs2.Stream(element2.getBytes().toList: _*).lift[IO]
-    val runEff: IO[Option[(Throwable, Location, Long)]] = bytes
-      .through(clientFixture().putResumable(StoragePath(element2, "os-valdemar"), chunkSize = 4))
-      .compile
-      .last
+    val bytes = fs2.Stream
+      .eval(element2F)
+      .flatMap(element2 => fs2.Stream(element2.path.getBytes().toList: _*).lift[IO])
+    val runEff: IO[Option[(Throwable, Location, Long)]] =
+      for {
+        bucket <- TestUtil.testBucket
+        element2 <- element2F
+        l <- bytes
+          .through(clientFixture().putResumable(element2, chunkFactor = 1))
+          .compile
+          .last
+      } yield l
 
-    runEff.flatMap{
-      case None => IO.unit
+    runEff.flatMap {
+      case None            => IO.unit
       case Some((t, _, _)) => IO.raiseError(t)
     }
   }
 
-  getTest(element2)
+  getTest(element2F.map(_.path))
 }
