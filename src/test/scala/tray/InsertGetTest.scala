@@ -48,17 +48,17 @@ class InsertGetTest extends CatsEffectSuite {
 
   getTest(elementF.map(_.path))
 
-  val elemChunkedF: IO[StoragePath] = TestUtil.randomStoragePath.memoize.unsafeRunSync()
-  test(s"should insert an object chunked encoding") {
-    for {
-      bucket <- TestUtil.testBucket
-      elementChunked <- elemChunkedF
-      data = fs2.Stream.chunk(fs2.Chunk.array(elementChunked.path.getBytes(StandardCharsets.UTF_8))).lift[IO]
-      _ <- data.through(clientFixture().putPipeChunked(elementChunked)).compile.drain
-    } yield ()
-  }
+  // val elemChunkedF: IO[StoragePath] = TestUtil.randomStoragePath.memoize.unsafeRunSync()
+  // test(s"should insert an object chunked encoding") {
+  //   for {
+  //     bucket <- TestUtil.testBucket
+  //     elementChunked <- elemChunkedF
+  //     data = fs2.Stream.chunk(fs2.Chunk.array(elementChunked.path.getBytes(StandardCharsets.UTF_8))).lift[IO]
+  //     _ <- data.through(clientFixture().putPipeChunked(elementChunked)).compile.drain
+  //   } yield ()
+  // }
 
-  getTest(elemChunkedF.map(_.path))
+  // getTest(elemChunkedF.map(_.path))
 
   test(s"should upload resumable") {
     val bytes = fs2.Stream
