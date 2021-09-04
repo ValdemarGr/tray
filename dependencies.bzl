@@ -1,4 +1,4 @@
-load("@scala_things//:dependencies/dependencies.bzl", "java_dependency", "scala_dependency", "scala_fullver_dependency", "make_scala_versions", "apply_scala_version", "apply_scala_fullver_version")
+load("@scala_things//:dependencies/dependencies.bzl", "java_dependency", "scala_dependency", "scala_fullver_dependency", "make_scala_versions", "apply_scala_fullver_version")
 
 scala_versions = make_scala_versions(
     "2",
@@ -19,7 +19,7 @@ project_deps = [
     scala_dependency("org.http4s", "http4s-jdk-http-client", "0.5.0-M4"),
 
     #CE
-    scala_dependency("org.typelevel", "cats-effect", "3.1.1"),
+    scala_dependency("org.typelevel", "cats-effect", "3.2.5"),
 
     #google
     java_dependency("com.google.auth", "google-auth-library-oauth2-http", "0.27.0"),
