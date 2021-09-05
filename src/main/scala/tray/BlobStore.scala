@@ -20,47 +20,18 @@ import cats.data.EitherT
 trait BlobStore[F[_]] extends ObjectsAPI[F]
 
 object BlobStore {
+  // magic constant from docs (256kb)
+  // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
+  val RECOMMENDED_SIZE: Int = 1024 * 256
+
   def apply[F[_]: Concurrent](auth: GCSAuth[F], client: Client[F]): BlobStore[F] =
     new BlobStore[F] {
-      // error helpers
-      def errBody(defaultErr: String, resp: Stream[F, Byte]): F[String] =
-        resp.through(fs2.text.utf8Decode).compile.foldMonoid.attempt.map {
-          case Left(err)   => defaultErr + s", cloud not get body with error $err"
-          case Right(body) => defaultErr + s"\n$body"
-        }
-
-      def failOnNonSuccess(req: Request[F], res: Response[F]): F[Response[F]] =
-        if (res.status.isSuccess) Concurrent[F].pure(res)
-        else
-          errBody(s"tray response had bad status code: \n$res\n$req", res.body).flatMap { em =>
-            Concurrent[F].raiseError(new TrayError.HttpStatusError(em))
-          }
-
       def putBlob(path: StoragePath, bytes: Array[Byte]): F[Unit] =
         Stream
           .chunk[F, Byte](Chunk.array(bytes))
           .through(putPipe(path, bytes.length.toLong))
           .compile
           .drain
-
-      // this should work, but it doesn't
-      def putPipeChunked(path: StoragePath): Pipe[F, Byte, Unit] = { stream =>
-        val eff =
-          for {
-            headers <- auth.getHeader
-            req = Request[F](
-              method = Method.POST,
-              uri = Endpoints.upload / "b" / path.bucket / "o" +? ("name", path.path) +? ("uploadType", "media"),
-              headers = Headers(`Content-Type`(MediaType.application.`octet-stream`)) ++ headers
-            ).withEntity(stream)
-            _ <- client
-              .run(req)
-              .use(res => failOnNonSuccess(req, res))
-              .void
-          } yield ()
-
-        Stream.eval(eff)
-      }
 
       def putPipe(path: StoragePath, length: Long): Pipe[F, Byte, Unit] = { stream =>
         val eff =
@@ -75,27 +46,12 @@ object BlobStore {
             )
             _ <- client
               .run(req)
-              .use(res => failOnNonSuccess(req, res))
+              .use(res => ErrorHandling.failOnNonSuccess(req, res))
               .void
           } yield ()
 
         Stream.eval(eff)
       }
-
-      //https://cloud.google.com/storage/docs/json_api/v1/objects/get
-      def getBlob(path: StoragePath): Resource[F, Stream[F, Byte]] =
-        for {
-          headers <- Resource.eval(auth.getHeader)
-          req = Request[F](
-            method = Method.GET,
-            uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "media"),
-            headers = headers
-          )
-          out <- client
-            .run(req)
-            .evalMap(res => failOnNonSuccess(req, res))
-            .map(_.body)
-        } yield out
 
       // These next blocks of code regard resumable uploads
       //Resume Incomplete https://cloud.google.com/storage/docs/performing-resumable-uploads#resume-upload
@@ -104,9 +60,9 @@ object BlobStore {
           for {
             range <- resp.headers.get[Range] match {
               case None =>
-                errBody(s"missing range header in response: $resp", resp.body).flatMap(em =>
-                  Concurrent[F].raiseError[Range](new Exception(em))
-                )
+                ErrorHandling
+                  .errBody(s"missing range header in response: $resp", resp.body)
+                  .flatMap(em => Concurrent[F].raiseError[Range](new Exception(em)))
               case Some(range) => Concurrent[F].pure(range)
             }
 
@@ -114,18 +70,18 @@ object BlobStore {
               .flatMap(_.second.toList)
               .maxByOption(identity) match {
               case None =>
-                errBody(s"range header had no end ranges in response: $resp", resp.body).flatMap(em =>
-                  Concurrent[F].raiseError[Long](new Exception(em))
-                )
+                ErrorHandling
+                  .errBody(s"range header had no end ranges in response: $resp", resp.body)
+                  .flatMap(em => Concurrent[F].raiseError[Long](new Exception(em)))
               case Some(value) => Concurrent[F].pure(value)
             }
           } yield l
         } else if (resp.status == Status.Ok || resp.status == Status.Created) {
           Concurrent[F].pure(doneSize)
         } else {
-          errBody(s"got unexpected result from api with response: $resp", resp.body).flatMap(em =>
-            Concurrent[F].raiseError(new Exception(em))
-          )
+          ErrorHandling
+            .errBody(s"got unexpected result from api with response: $resp", resp.body)
+            .flatMap(em => Concurrent[F].raiseError(new Exception(em)))
         }
 
       def putByteRange(uri: Uri, offset: Long, chunk: Chunk[Byte], isLast: Boolean): F[Either[Throwable, Long]] = {
@@ -149,14 +105,14 @@ object BlobStore {
         effect.attempt
       }
 
-      def resumeFrom(uri: Uri, offset: Long, chunkSize: Int, stream: Stream[F, Byte]): Stream[F, (Throwable, Long)] =
+      def putResumableFrom(uri: Uri, offset: Long, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Long)] = stream =>
         stream.pull
-          .unconsN(chunkSize + 1, allowFewer = true)
+          .unconsN((RECOMMENDED_SIZE * chunkFactor) + 1, allowFewer = true)
           .flatMap {
             case None                                        => Pull.done
             case Some((x: Chunk[Byte], xs: Stream[F, Byte])) =>
               // if the next chunk is non-empty then we are not done
-              val (firsts, nextFirst) = x.splitAt(chunkSize)
+              val (firsts, nextFirst) = x.splitAt(RECOMMENDED_SIZE * chunkFactor)
 
               def returnOrGo(
                 fa: F[Either[Throwable, Long]]
@@ -179,12 +135,13 @@ object BlobStore {
                       x.drop(toDrop.toInt)
                     }
 
-                  resumeFrom(
-                    uri,
-                    offset = offset + chunkSize - chunksThatServerDidntEat.size,
-                    chunkSize = chunkSize,
-                    stream = xs.cons(chunksThatServerDidntEat ++ nextFirst)
-                  )
+                  xs.cons(chunksThatServerDidntEat ++ nextFirst).through {
+                    putResumableFrom(
+                      uri,
+                      offset = newOffset,
+                      chunkFactor = chunkFactor
+                    )
+                  }
                 }
               }
 
@@ -202,7 +159,7 @@ object BlobStore {
           )
           resp <- client
             .run(req)
-            .use(res => failOnNonSuccess(req, res))
+            .use(res => ErrorHandling.failOnNonSuccess(req, res))
           loc <- Concurrent[F].fromOption(
             resp.headers.get[`Location`],
             new Exception(s"failed to find location header in resumable upload")
@@ -211,19 +168,111 @@ object BlobStore {
 
       def putResumable(path: StoragePath, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Location, Long)] =
         stream => {
-          // magic constant from docs (256kb)
-          // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
-          val reccomendedBy = 262144
           val putLoc: F[Location] = initiateResumable(path)
 
           val putInto: Stream[F, (Throwable, Location, Long)] =
             Stream
               .eval(putLoc)
               .flatMap { loc =>
-                resumeFrom(loc.uri, 0, reccomendedBy * chunkFactor, stream).map { case (t, o) => (t, loc, o) }
+                stream.through(putResumableFrom(loc.uri, 0, chunkFactor)).map { case (t, o) => (t, loc, o) }
               }
 
           putInto
+        }
+
+      //https://cloud.google.com/storage/docs/json_api/v1/objects/get
+      def getBlob(path: StoragePath): Stream[F, Byte] =
+        Stream.eval(auth.getHeader).flatMap { headers =>
+          val req = Request[F](
+            method = Method.GET,
+            uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "media"),
+            headers = headers
+          )
+
+          client
+            .stream(req)
+            .evalMap(res => ErrorHandling.failOnNonSuccess(req, res))
+            .flatMap(_.body)
+
+        }
+
+      def getRange(path: StoragePath, offset: Long, end: Long, chunkFactor: Int = 1): Stream[F, Byte] =
+        Stream.eval(auth.getHeader).flatMap { headers =>
+          val thisChunk = RECOMMENDED_SIZE * chunkFactor
+          val thisEnd = Math.min(offset + thisChunk, end)
+
+          val req = Request[F](
+            method = Method.GET,
+            uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "media"),
+            headers = headers ++ Headers(Range(offset, thisEnd))
+          )
+
+          val c = client
+            .run(req)
+            .evalMap(res => ErrorHandling.failOnNonSuccess(req, res))
+
+          /*
+           * We must use the Content-Length header to determine how much the server actually gave us, to derive the next range.
+           *
+           * We need to do some unsafe work with the response
+           * Say we were to use a stream's lifecycle management for a resource
+           * when we open the resource via a flatMap we would need to say resp.body ++ getRange(path, range')
+           * Doing so would only let the resource close once the entire callstack of streams had completed.
+           *
+           * To combat this, realize that the responses headers can exceed the lifetime of the response
+           * such that it becomes a matter of closing the resource _after_ the current body has been consumed
+           * and passing the header to the next batch
+           */
+          Stream.eval(c.allocated).flatMap { case (resp, release) =>
+            val cl = resp.headers.get[`Content-Length`].map(_.length)
+
+            cl match {
+              case None =>
+                val failF = ErrorHandling
+                  .errBody(s"failed to find content-length header in response $resp", resp.body)
+                  .flatMap { em =>
+                    Concurrent[F].raiseError[Byte](new Exception(em))
+                  }
+                Stream.eval(release) >> Stream.eval(failF)
+              case Some(length) =>
+                val theseBytes = resp.body.onFinalize[F](release)
+                val nextBytes = getRange(path, offset + length, end, chunkFactor)
+                theseBytes ++ nextBytes
+            }
+          }
+        }
+
+      def getResumable(path: StoragePath, chunkFactor: Int = 1): Stream[F, Byte] =
+        getResumableFrom(path, 0, chunkFactor)
+
+      def getResumableFrom(path: StoragePath, start: Long, chunkFactor: Int = 1): Stream[F, Byte] =
+        Stream.eval(getMetadata(path)).flatMap { metadata =>
+          getRange(path, start, metadata.size, chunkFactor)
+        }
+
+      val byteStreamToResumable: Pipe[F, Byte, Either[(Throwable, Long), Chunk[Byte]]] = stream =>
+        stream.chunks
+          .zipWithScan(0L) { case (idx, bytes) =>
+            idx + bytes.size
+          }
+          .attempt
+          .zipWithPrevious
+          .flatMap {
+            case (Some(Right((_, l))), Left(err)) => Stream(Left((err, l)))
+            case (_, Left(err))                   => Stream(Left((err, 0)))
+            case (_, Right((bytes, _)))           => Stream(Right(bytes))
+          }
+
+      def getMetadata(path: StoragePath): F[BlobMetadata] =
+        auth.getHeader.flatMap { headers =>
+          val req = Request[F](
+            method = Method.GET,
+            uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "json"),
+            headers = headers
+          )
+
+          client
+            .expect[BlobMetadata](req)
         }
     }
 }

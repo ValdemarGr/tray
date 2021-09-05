@@ -17,6 +17,13 @@ project_deps = [
     scala_dependency("org.http4s", "http4s-dsl", "1.0.0-M20"),
     scala_dependency("org.http4s", "http4s-client", "1.0.0-M20"),
     scala_dependency("org.http4s", "http4s-jdk-http-client", "0.5.0-M4"),
+    scala_dependency("org.http4s", "http4s-circe", "1.0.0-M20"),
+
+    #circe
+    scala_dependency("io.circe", "circe-core", "0.14.1"),
+    scala_dependency("io.circe", "circe-parser", "0.14.1"),
+    scala_dependency("io.circe", "circe-generic", "0.14.1"),
+    scala_dependency("io.circe", "circe-generic-extras", "0.14.1"),
 
     #CE
     scala_dependency("org.typelevel", "cats-effect", "3.2.5"),

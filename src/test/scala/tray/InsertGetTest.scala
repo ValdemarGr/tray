@@ -33,7 +33,7 @@ class InsertGetTest extends CatsEffectSuite {
         name <- nameF
         string <- bs
           .getBlob(StoragePath(name, bucket))
-          .use(_.compile.to(Array))
+          .compile.to(Array)
           .map(bytes => new String(bytes, StandardCharsets.UTF_8))
       } yield assertEquals(string, name)
     }
