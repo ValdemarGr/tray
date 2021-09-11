@@ -14,7 +14,7 @@ trait ObjectsAPI[F[_]] {
 
   def putPipe(path: StoragePath, length: Long): Pipe[F, Byte, Unit]
 
-  def putResumableFrom(uri: Uri, offset: Long, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Long)]
+  def putResumableFrom(loc: Location, offset: Long, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Long)]
 
   def putResumable(path: StoragePath, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Location, Long)]
 
@@ -34,6 +34,7 @@ trait ObjectsAPI[F[_]] {
 object ObjectsAPI {
   // magic constant from docs (256kb)
   // https://cloud.google.com/storage/docs/performing-resumable-uploads#chunked-upload
+  // + 1 since google cloud storage api has an off by one error
   val RECOMMENDED_SIZE: Int = 1024 * 256
 
   def apply[F[_]: Concurrent](bs: BlobStore[F]): ObjectsAPI[F] = new ObjectsAPI[F] {
@@ -67,7 +68,10 @@ object ObjectsAPI {
 
     // These next blocks of code regard resumable uploads
     //Resume Incomplete https://cloud.google.com/storage/docs/performing-resumable-uploads#resume-upload
-    def handleHeader(resp: Response[F], doneSize: Long): F[Long] =
+    sealed trait ApiOffset
+    final case class IncompleteOffset(next: Long) extends ApiOffset
+    case object DoneOffset extends ApiOffset
+    def handleHeader(resp: Response[F], doneSize: Long): F[ApiOffset] =
       if (resp.status.code == 308) {
         for {
           range <- resp.headers.get[Range] match {
@@ -87,16 +91,15 @@ object ObjectsAPI {
                 .flatMap(em => Concurrent[F].raiseError[Long](new Exception(em)))
             case Some(value) => Concurrent[F].pure(value)
           }
-        } yield l
-      } else if (resp.status == Status.Ok || resp.status == Status.Created) {
-        Concurrent[F].pure(doneSize)
-      } else {
+        } yield IncompleteOffset(l)
+      } else if (resp.status == Status.Ok || resp.status == Status.Created) Concurrent[F].pure(DoneOffset)
+      else {
         ErrorHandling
           .errBody(s"got unexpected result from api with response: $resp", resp.body)
           .flatMap(em => Concurrent[F].raiseError(new Exception(em)))
       }
 
-    def putByteRange(uri: Uri, offset: Long, chunk: Chunk[Byte], isLast: Boolean): F[Either[Throwable, Long]] = {
+    def putByteRange(uri: Uri, offset: Long, chunk: Chunk[Byte], isLast: Boolean): F[Either[Throwable, ApiOffset]] = {
       val endingO = if (isLast) {
         Some(offset + chunk.size)
       } else None
@@ -107,10 +110,10 @@ object ObjectsAPI {
         headers = Headers(
           `Content-Length`(chunk.size),
           `Content-Range`(range = Range.SubRange(offset, offset + chunk.size - 1), endingO)
-        ) // - 1 since 0 indexed
+        ) // - 1 since this range is _inclusive_ of the first byte; size(0, 1, .., 99) = 100
       ).withEntity(chunk)
 
-      val effect: F[Long] = client.run(req).use { resp =>
+      val effect: F[ApiOffset] = client.run(req).use { resp =>
         handleHeader(resp, chunk.size + offset)
       }
 
@@ -118,39 +121,53 @@ object ObjectsAPI {
     }
 
     // we eat one extra, to check if this chunk is the last one
-    def putResumableFrom(uri: Uri, offset: Long, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Long)] = stream =>
-      stream.pull
-        .unconsN((RECOMMENDED_SIZE * chunkFactor) + 1, allowFewer = true)
-        .flatMap {
-          case None => Pull.done
-          case Some((x: Chunk[Byte], tmp: Stream[F, Byte])) =>
-            val (isLast, bytes, xs) =
-              if (x.size <= RECOMMENDED_SIZE * chunkFactor) {
-                (true, x, tmp)
-              } else {
-                (false, x.dropRight(1), Stream.chunk(x.takeRight(1)) ++ tmp)
-              }
+    def putResumableFrom(loc: Location, offset: Long, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Long)] =
+      stream =>
+        stream.pull
+          .unconsN((RECOMMENDED_SIZE * chunkFactor) + 1, allowFewer = true)
+          .flatMap {
+            case None => Pull.done
+            case Some((x: Chunk[Byte], tmp: Stream[F, Byte])) =>
+              val (isLast, bytes, xs) =
+                if (x.size <= RECOMMENDED_SIZE * chunkFactor) {
+                  (true, x, tmp)
+                } else {
+                  (false, x.dropRight(1), Stream.chunk(x.takeRight(1)) ++ tmp)
+                }
 
-            Stream
-              .eval(putByteRange(uri, offset, bytes, isLast = isLast))
-              .flatMap {
-                case Left(err)        => Stream((err, offset))
-                case Right(newOffset) =>
-                  // if we didn't progress, fail
-                  if (newOffset == offset) Stream((new Exception(s"server didn't accept any bytes at $offset"), offset))
-                  // if we ate all and this is the last chunk, we are done
-                  else if (newOffset == offset + bytes.size && isLast) Stream.empty
-                  // else we continue
-                  else {
-                    val bytesThatServerDidntAccept: Chunk[Byte] = bytes.drop((newOffset - offset).toInt)
-                    val rest = Stream.chunk(bytesThatServerDidntAccept) ++ xs
-                    rest.through(putResumableFrom(uri, newOffset, chunkFactor))
-                  }
-              }
-              .pull
-              .echo
-        }
-        .stream
+              Stream
+                .eval(putByteRange(loc.uri, offset, bytes, isLast = isLast))
+                .flatMap {
+                  case Left(err)                        => Stream((err, offset))
+                  case Right(DoneOffset)                => Stream.empty
+                  case Right(IncompleteOffset(thisEnd)) =>
+                    // if we didn't progress, fail
+                    if (thisEnd == offset)
+                      Stream((new Exception(s"server didn't accept any bytes at $offset"), offset))
+                    // else we continue
+                    else {
+                      // begin after the offset we just completed at
+                      val nextOffset = thisEnd + 1
+                      /* off-by-one correctness sketch
+                       * offset is 200
+                       * server ate 5 out of 10
+                       * thisEnd = 204 (server ate bytes [200, 201 ..., 204])
+                       * nextOffset = 205
+                       * remaining must be [205, 206, 207, 208, 209]
+                       * below must be drop nextOffset - offset (5) bytes
+                       *
+                       * in the case that all bytes are eaten then nextOffset = offset + size([200, ..., 209]) = 210
+                       * [200, ..., 209].drop(210 - 200) = []
+                       */
+                      val bytesThatServerDidntAccept: Chunk[Byte] = bytes.drop((nextOffset - offset).toInt)
+                      val rest = Stream.chunk(bytesThatServerDidntAccept) ++ xs
+                      rest.through(putResumableFrom(loc, nextOffset, chunkFactor))
+                    }
+                }
+                .pull
+                .echo
+          }
+          .stream
 
     def initiateResumable(path: StoragePath): F[Location] =
       for {
@@ -177,7 +194,7 @@ object ObjectsAPI {
           Stream
             .eval(putLoc)
             .flatMap { loc =>
-              stream.through(putResumableFrom(loc.uri, 0, chunkFactor)).map { case (t, o) => (t, loc, o) }
+              stream.through(putResumableFrom(loc, 0, chunkFactor)).map { case (t, o) => (t, loc, o) }
             }
 
         putInto
