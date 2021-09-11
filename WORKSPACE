@@ -28,18 +28,18 @@ rules_proto_dependencies()
 rules_proto_toolchains()
 
 # dependencies
-local_repository(
-    name = "scala_things",
-    path = "../bazel-things",
-)
-# commit_sha = "5358d2122015c2159d99191aaef94c2caadd011f"
-
-# http_archive(
+# local_repository(
 #     name = "scala_things",
-#     sha256 = "e937e8a8ca2047f74a1e385fa44b9e11652290852fdf7776d665a4d71dc82c36",
-#     strip_prefix = "bazel-things-%s" % commit_sha,
-#     url = "https://github.com/valdemargr/bazel-things/archive/%s.zip" % commit_sha,
+#     path = "../bazel-things",
 # )
+commit_sha = "aac97718c4d7ecbb3cabf6525861f1d9156c6e05"
+
+http_archive(
+    name = "scala_things",
+    sha256 = "b2bc766f452a45810a34783c011a620bb8ad6d6738f4a9b2189f03a1f3301554",
+    strip_prefix = "bazel-things-%s" % commit_sha,
+    url = "https://github.com/valdemargr/bazel-things/archive/%s.zip" % commit_sha,
+)
 
 load("@scala_things//:dependencies/init.bzl", "bazel_things_dependencies")
 
