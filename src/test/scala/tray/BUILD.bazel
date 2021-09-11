@@ -42,6 +42,7 @@ scala_junit_suite(
     srcs = glob(["*Test.scala"]),
     plugins = [
         "@maven//:com_olegpy_better_monadic_for_2_13",
+        "@maven//:org_typelevel_kind_projector_2_13_6",
     ],
     suffixes = ["Test"],
     deps = shared_deps + [

@@ -9,6 +9,7 @@ scala_versions = make_scala_versions(
 project_deps = [
     #plugins
     scala_dependency("com.olegpy", "better-monadic-for", "0.3.1"),
+    scala_fullver_dependency("org.typelevel", "kind-projector", "0.13.0"),
 
     #testing
     scala_dependency("org.scalameta", "munit", "0.7.27"),
