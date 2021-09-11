@@ -16,42 +16,16 @@ import cats.Eval
 class InsertGetTest extends CatsEffectSuite with TestUtil {
   import cats.implicits._
 
-  val elementF = memoedStoragePathF
-  val element2F = memoedStoragePathF
-
-  def getTest(spF: IO[StoragePath], dataF: IO[String]) =
-    test(s"should get the inserted object") {
-      for {
-        bucket <- memoBucket
-        sp <- spF
-        data <- dataF
-        string <- bs
-          .getBlob(sp)
-          .through(fs2.text.utf8Decode)
-          .compile
-          .lastOrError
-      } yield assertEquals(string, data)
-    }
-
-  val data = infiniteDataStream.take(16).compile.to(Array)
-  test(s"should insert an object") {
-    for {
-      bucket <- memoBucket
-      element <- elementF
-      _ <- bs.putBlob(element, data)
-    } yield ()
-  }
-
-  getTest(elementF, IO.pure(new String(data, StandardCharsets.UTF_8)))
-
+  val smallSp = memoedStoragePathF
   val dataStream = infiniteDataStream.take(16)
+
   test(s"should upload a small object resumable") {
     val runEff: IO[Option[(Throwable, Location, Long)]] =
       for {
         bucket <- memoBucket
-        element2 <- element2F
+        sp <- smallSp
         l <- dataStream
-          .through(bs.putResumable(element2, chunkFactor = 1))
+          .through(bs.putResumable(sp, chunkFactor = 1))
           .compile
           .last
       } yield l
@@ -62,7 +36,17 @@ class InsertGetTest extends CatsEffectSuite with TestUtil {
     }
   }
 
-  getTest(element2F, IO.pure(dataStream.through(fs2.text.utf8Decode).compile.string))
+  test(s"should get the inserted object") {
+    for {
+      bucket <- memoBucket
+      sp <- smallSp
+      string <- bs
+        .getBlob(sp)
+        .through(fs2.text.utf8Decode)
+        .compile
+        .lastOrError
+    } yield assertEquals(string, dataStream.through(fs2.text.utf8Decode).compile.string)
+  }
 
   val exactlyOneItBytes = 1024L * 256L
   val exactlyOneItData = infiniteDataStream.take(exactlyOneItBytes)
