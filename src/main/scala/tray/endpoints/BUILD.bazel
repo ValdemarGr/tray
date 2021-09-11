@@ -3,9 +3,9 @@ load("@scala_things//:flags/flags.bzl", "flags", "unused_targets_ignored")
 
 scala_library(
     name = "endpoints",
+    srcs = glob(["*.scala"]),
     scalacopts = flags,
     unused_dependency_checker_ignored_targets = unused_targets_ignored("2_13")["http4s_uri_macro"],
-    srcs = glob(["*.scala"]),
     visibility = ["//visibility:public"],
     deps = [
         #cats

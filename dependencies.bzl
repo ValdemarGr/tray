@@ -1,4 +1,4 @@
-load("@scala_things//:dependencies/dependencies.bzl", "java_dependency", "scala_dependency", "scala_fullver_dependency", "make_scala_versions", "apply_scala_fullver_version")
+load("@scala_things//:dependencies/dependencies.bzl", "apply_scala_fullver_version", "java_dependency", "make_scala_versions", "scala_dependency", "scala_fullver_dependency")
 
 scala_versions = make_scala_versions(
     "2",
@@ -33,7 +33,7 @@ project_deps = [
 
     #google
     java_dependency("com.google.auth", "google-auth-library-oauth2-http", "0.27.0"),
-    java_dependency("com.google.auth", "google-auth-library-credentials", "0.27.0")
+    java_dependency("com.google.auth", "google-auth-library-credentials", "0.27.0"),
 ]
 
 def add_scala_fullver(s):

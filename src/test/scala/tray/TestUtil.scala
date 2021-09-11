@@ -7,6 +7,8 @@ import org.http4s.client.jdkhttpclient.JdkHttpClient
 import tray.auth.GCSAuth
 import fs2._
 import cats.Eval
+import cats.implicits._
+import cats.effect.ResourceApp
 
 trait TestUtil extends CatsEffectSuite {
   val TEST_BUCKET_ENV = "TEST_BUCKET"
@@ -45,10 +47,7 @@ trait TestUtil extends CatsEffectSuite {
       for {
         l <- makeBytes(left)
         r <- makeBytes(right)
-      } yield {
-        val c = l ++ r
-        l ++ r
-      }
+      } yield l ++ r
     }
   }
 

@@ -33,6 +33,7 @@ rules_proto_toolchains()
 #     path = "../bazel-things",
 # )
 commit_sha = "5358d2122015c2159d99191aaef94c2caadd011f"
+
 http_archive(
     name = "scala_things",
     sha256 = "e937e8a8ca2047f74a1e385fa44b9e11652290852fdf7776d665a4d71dc82c36",
@@ -47,13 +48,19 @@ bazel_things_dependencies()
 load("//:dependencies.bzl", "project_deps", "scala_versions")
 load("@scala_things//:dependencies/dependencies.bzl", "install_dependencies", "to_string_version")
 
+install_dependencies(
+    project_deps,
+    scala_versions,
+    use_pinned = True,
+)
 
-install_dependencies(project_deps, scala_versions, use_pinned=True)
 load("@maven//:defs.bzl", "pinned_maven_install")
+
 pinned_maven_install()
 
 # scala
 rules_scala_version = "b85d1225d0ddc9c376963eb0be86d9d546f25a4a"  # update this as needed
+
 http_archive(
     name = "io_bazel_rules_scala",
     sha256 = "f6fa4897545e8a93781ad8936d5a59e90e2102918e8997a9dab3dc5c5ce2e09e",

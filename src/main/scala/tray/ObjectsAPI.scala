@@ -37,6 +37,11 @@ object ObjectsAPI {
   // + 1 since google cloud storage api has an off by one error
   val RECOMMENDED_SIZE: Int = 1024 * 256
 
+  //indicators for resumable upload
+  sealed trait ApiOffset
+  final case class IncompleteOffset(next: Long) extends ApiOffset
+  case object DoneOffset extends ApiOffset
+
   def apply[F[_]: Concurrent](bs: BlobStore[F]): ObjectsAPI[F] = new ObjectsAPI[F] {
     import bs._
 
@@ -68,9 +73,6 @@ object ObjectsAPI {
 
     // These next blocks of code regard resumable uploads
     //Resume Incomplete https://cloud.google.com/storage/docs/performing-resumable-uploads#resume-upload
-    sealed trait ApiOffset
-    final case class IncompleteOffset(next: Long) extends ApiOffset
-    case object DoneOffset extends ApiOffset
     def handleHeader(resp: Response[F], doneSize: Long): F[ApiOffset] =
       if (resp.status.code == 308) {
         for {
