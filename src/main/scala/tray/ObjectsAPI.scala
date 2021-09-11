@@ -124,9 +124,6 @@ object ObjectsAPI {
         .flatMap {
           case None => Pull.done
           case Some((x: Chunk[Byte], tmp: Stream[F, Byte])) =>
-            println(
-              s"offset $offset cf $chunkFactor cs ${RECOMMENDED_SIZE * chunkFactor} x ${x.size}"
-            )
             val (isLast, bytes, xs) =
               if (x.size <= RECOMMENDED_SIZE * chunkFactor) {
                 (true, x, tmp)

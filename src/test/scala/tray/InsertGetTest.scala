@@ -64,23 +64,43 @@ class InsertGetTest extends CatsEffectSuite with TestUtil {
 
   getTest(element2F, IO.pure(dataStream.through(fs2.text.utf8Decode).compile.string))
 
-  val spF = memoedStoragePathF
-  val numBytes = 1024L * 300L
-  val bigData = infiniteDataStream.take(numBytes)
+  val exactlyOneItBytes = 1024L * 256L
+  val exactlyOneItData = infiniteDataStream.take(exactlyOneItBytes)
+  val exactlyOneSp = memoedStoragePathF
 
-  test("should resumably upload an object that requires two iterations") {
+  val twoItsBytes = exactlyOneItBytes + 1L
+  val twoItsData = infiniteDataStream.take(twoItsBytes)
+  val twoItsSp = memoedStoragePathF
+
+  test("should resumably upload an object that requires exactly one request") {
     for {
       bucket <- memoBucket
-      sp <- spF
-      lo <- bigData.through(bs.putResumable(sp)).compile.last
+      sp <- exactlyOneSp
+      lo <- exactlyOneItData.through(bs.putResumable(sp, chunkFactor = 1)).compile.last
     } yield assert(clue(lo).isEmpty)
   }
 
-  test("there should be an equivalent number of bytes when getting the resource") {
+  test("should resumably upload an object that two requests") {
     for {
       bucket <- memoBucket
-      sp <- spF
+      sp <- twoItsSp
+      lo <- twoItsData.through(bs.putResumable(sp, chunkFactor = 1)).compile.last
+    } yield assert(clue(lo).isEmpty)
+  }
+
+  test("chuck the length of the data for exactly one request") {
+    for {
+      bucket <- memoBucket
+      sp <- exactlyOneSp
       gotten <- bs.getBlob(sp).compile.foldChunks(0L) { case (accum, next) => accum + next.size }
-    } yield assertEquals(gotten, numBytes)
+    } yield assertEquals(gotten, exactlyOneItBytes)
+  }
+
+  test("chuck the length of the data for two requests") {
+    for {
+      bucket <- memoBucket
+      sp <- twoItsSp
+      gotten <- bs.getBlob(sp).compile.foldChunks(0L) { case (accum, next) => accum + next.size }
+    } yield assertEquals(gotten, twoItsBytes)
   }
 }
