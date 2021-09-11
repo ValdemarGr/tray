@@ -10,55 +10,48 @@ import java.nio.charset.StandardCharsets
 import org.http4s.MediaType
 import org.http4s.headers.Location
 import tray.objects._
+import fs2._
+import cats.Eval
 
-class InsertGetTest extends CatsEffectSuite {
+class InsertGetTest extends CatsEffectSuite with TestUtil {
   import cats.implicits._
 
-  val elementF = TestUtil.randomStoragePath.memoize.unsafeRunSync()
-  val element2F = TestUtil.randomStoragePath.memoize.unsafeRunSync()
-  val clientFixture = ResourceSuiteLocalFixture(
-    "storage_client",
-    JdkHttpClient.simple[IO].evalMap { client =>
-      GCSAuth[IO].map(auth => BlobStore[IO](auth, client))
-    }
-  )
+  val elementF = memoedStoragePathF
+  val element2F = memoedStoragePathF
 
-  override def munitFixtures = List(clientFixture)
-
-  def getTest(nameF: IO[String]) =
+  def getTest(spF: IO[StoragePath], dataF: IO[String]) =
     test(s"should get the inserted object") {
-      val bs = clientFixture()
-
       for {
-        bucket <- TestUtil.testBucket
-        name <- nameF
+        bucket <- memoBucket
+        sp <- spF
+        data <- dataF
         string <- bs
-          .getBlob(StoragePath(name, bucket))
-          .compile.to(Array)
-          .map(bytes => new String(bytes, StandardCharsets.UTF_8))
-      } yield assertEquals(string, name)
+          .getBlob(sp)
+          .through(fs2.text.utf8Decode)
+          .compile
+          .lastOrError
+      } yield assertEquals(string, data)
     }
 
+  val data = infiniteDataStream.take(16).compile.to(Array)
   test(s"should insert an object") {
     for {
-      bucket <- TestUtil.testBucket
+      bucket <- memoBucket
       element <- elementF
-      _ <- clientFixture().putBlob(element, element.path.getBytes(StandardCharsets.UTF_8))
+      _ <- bs.putBlob(element, data)
     } yield ()
   }
 
-  getTest(elementF.map(_.path))
+  getTest(elementF, IO.pure(new String(data, StandardCharsets.UTF_8)))
 
-  test(s"should upload resumable") {
-    val bytes = fs2.Stream
-      .eval(element2F)
-      .flatMap(element2 => fs2.Stream(element2.path.getBytes().toList: _*).lift[IO])
+  val dataStream = infiniteDataStream.take(16)
+  test(s"should upload a small object resumable") {
     val runEff: IO[Option[(Throwable, Location, Long)]] =
       for {
-        bucket <- TestUtil.testBucket
+        bucket <- memoBucket
         element2 <- element2F
-        l <- bytes
-          .through(clientFixture().putResumable(element2, chunkFactor = 1))
+        l <- dataStream
+          .through(bs.putResumable(element2, chunkFactor = 1))
           .compile
           .last
       } yield l
@@ -69,5 +62,25 @@ class InsertGetTest extends CatsEffectSuite {
     }
   }
 
-  getTest(element2F.map(_.path))
+  getTest(element2F, IO.pure(dataStream.through(fs2.text.utf8Decode).compile.string))
+
+  val spF = memoedStoragePathF
+  val numBytes = 1024L * 300L
+  val bigData = infiniteDataStream.take(numBytes)
+
+  test("should resumably upload an object that requires two iterations") {
+    for {
+      bucket <- memoBucket
+      sp <- spF
+      lo <- bigData.through(bs.putResumable(sp)).compile.last
+    } yield assert(clue(lo).isEmpty)
+  }
+
+  test("there should be an equivalent number of bytes when getting the resource") {
+    for {
+      bucket <- memoBucket
+      sp <- spF
+      gotten <- bs.getBlob(sp).compile.foldChunks(0L) { case (accum, next) => accum + next.size }
+    } yield assertEquals(gotten, numBytes)
+  }
 }

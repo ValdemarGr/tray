@@ -117,47 +117,41 @@ object ObjectsAPI {
       effect.attempt
     }
 
+    // we eat one extra, to check if this chunk is the last one
     def putResumableFrom(uri: Uri, offset: Long, chunkFactor: Int = 1): Pipe[F, Byte, (Throwable, Long)] = stream =>
       stream.pull
         .unconsN((RECOMMENDED_SIZE * chunkFactor) + 1, allowFewer = true)
         .flatMap {
-          case None                                        => Pull.done
-          case Some((x: Chunk[Byte], xs: Stream[F, Byte])) =>
-            // if the next chunk is non-empty then we are not done
-            val (firsts, nextFirst) = x.splitAt(RECOMMENDED_SIZE * chunkFactor)
-
-            def returnOrGo(
-              fa: F[Either[Throwable, Long]]
-            )(f: Long => Stream[F, (Throwable, Long)]): Stream[F, (Throwable, Long)] =
-              Stream.eval(fa).flatMap {
-                case Left(err)     => Stream((err, offset))
-                case Right(offset) => f(offset)
+          case None => Pull.done
+          case Some((x: Chunk[Byte], tmp: Stream[F, Byte])) =>
+            println(
+              s"offset $offset cf $chunkFactor cs ${RECOMMENDED_SIZE * chunkFactor} x ${x.size}"
+            )
+            val (isLast, bytes, xs) =
+              if (x.size <= RECOMMENDED_SIZE * chunkFactor) {
+                (true, x, tmp)
+              } else {
+                (false, x.dropRight(1), Stream.chunk(x.takeRight(1)) ++ tmp)
               }
 
-            val restStream: Stream[F, (Throwable, Long)] = if (nextFirst.isEmpty) {
-              returnOrGo(putByteRange(uri, offset, x, isLast = true))(_ => Stream.empty)
-            } else {
-              returnOrGo(putByteRange(uri, offset, x, isLast = false)) { newOffset =>
-                val toDrop = newOffset - offset
-
-                val chunksThatServerDidntEat: Chunk[Byte] =
-                  if (toDrop == x.size) {
-                    Chunk.empty
-                  } else {
-                    x.drop(toDrop.toInt)
+            Stream
+              .eval(putByteRange(uri, offset, bytes, isLast = isLast))
+              .flatMap {
+                case Left(err)        => Stream((err, offset))
+                case Right(newOffset) =>
+                  // if we didn't progress, fail
+                  if (newOffset == offset) Stream((new Exception(s"server didn't accept any bytes at $offset"), offset))
+                  // if we ate all and this is the last chunk, we are done
+                  else if (newOffset == offset + bytes.size && isLast) Stream.empty
+                  // else we continue
+                  else {
+                    val bytesThatServerDidntAccept: Chunk[Byte] = bytes.drop((newOffset - offset).toInt)
+                    val rest = Stream.chunk(bytesThatServerDidntAccept) ++ xs
+                    rest.through(putResumableFrom(uri, newOffset, chunkFactor))
                   }
-
-                xs.cons(chunksThatServerDidntEat ++ nextFirst).through {
-                  putResumableFrom(
-                    uri,
-                    offset = newOffset,
-                    chunkFactor = chunkFactor
-                  )
-                }
               }
-            }
-
-            restStream.pull.echo
+              .pull
+              .echo
         }
         .stream
 
