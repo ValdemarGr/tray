@@ -5,20 +5,19 @@ scala_library(
     srcs = glob(["*.scala"]),
     visibility = ["//visibility:public"],
     deps = [
-        #fs2
         "@maven//:co_fs2_fs2_core_2_13",
-
-        #CE
+    "@maven//:io_circe_circe_core_2_13",
+    "@maven//:io_circe_circe_generic_2_13",
+    "@maven//:com_chuusai_shapeless_2_13",
         "@maven//:org_typelevel_cats_kernel_2_13",
         "@maven//:org_typelevel_cats_core_2_13",
         "@maven//:org_typelevel_cats_effect_kernel_2_13",
         "@maven//:org_typelevel_cats_effect_2_13",
-
-        #http4s
         "@maven//:org_http4s_http4s_core_2_13",
+        "@maven//:org_http4s_http4s_circe_2_13",
+        "@maven//:org_http4s_http4s_jawn_2_13",
         "@maven//:org_http4s_http4s_client_2_13",
         "@maven//:org_typelevel_vault_2_13",
-
         "//src/main/scala/tray/auth",
         "//src/main/scala/tray/endpoints",
         "//src/main/scala/tray/errors",
