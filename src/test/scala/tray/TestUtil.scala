@@ -38,18 +38,28 @@ trait TestUtil extends CatsEffectSuite {
 
   lazy val bs = blobStore()
 
-  val baseString = "i am a base string!!"
-  def makeBytes(remaining: Int): Eval[Chunk[Byte]] = Eval.defer {
-    if (remaining <= baseString.length()) Eval.now(Chunk.array(baseString.take(remaining).getBytes()))
+  def baseString(state: Long) = s"$state i am a base string!!"
+  def makeBytesR(state: Long, remaining: Int): Eval[Chunk[Byte]] = Eval.defer {
+    if (remaining <= baseString(state).length()) Eval.now(Chunk.array(baseString(state).take(remaining).getBytes()))
     else {
       val left = remaining / 2
       val right = remaining - left
       for {
-        l <- makeBytes(left)
-        r <- makeBytes(right)
+        l <- makeBytesR(state, left)
+        r <- makeBytesR(state - left, right)
       } yield l ++ r
     }
   }
+  def makeBytes(remaining: Int): Eval[Chunk[Byte]] = makeBytesR(remaining, remaining)
 
   val infiniteDataStream = Stream.chunk(makeBytes(1024 * 128).value).repeat
+
+  def checksum(stream: Stream[IO, Byte]): IO[String] =
+    stream.through(fs2.hash.sha256).through(fs2.text.utf8Decode).compile.string
+
+  def compareBytestreams(gotten: Stream[IO, Byte], expected: Stream[IO, Byte]): IO[Unit] =
+    for {
+      gottenSha <- checksum(gotten)
+      expectedSha <- checksum(expected)
+    } yield assertEquals(gottenSha, expectedSha)
 }

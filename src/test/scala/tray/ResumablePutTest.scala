@@ -88,28 +88,28 @@ class InsertGetTest extends CatsEffectSuite with TestUtil {
     } yield assert(clue(lo).isEmpty)
   }
 
-  test("check the length of the data for exactly one request") {
+  test("check the checksum of the data for exactly one request") {
     for {
       bucket <- memoBucket
       sp <- exactlyOneSp
-      gotten <- bs.getBlob(sp).compile.foldChunks(0L) { case (accum, next) => accum + next.size }
-    } yield assertEquals(gotten, exactlyOneItBytes)
+      _ <- compareBytestreams(bs.getBlob(sp), exactlyOneItData)
+    } yield ()
   }
 
-  test("check the length of the data for two requests") {
+  test("check the checksum of the data for two requests") {
     for {
       bucket <- memoBucket
       sp <- twoItsSp
-      gotten <- bs.getBlob(sp).compile.foldChunks(0L) { case (accum, next) => accum + next.size }
-    } yield assertEquals(gotten, twoItsBytes)
+      _ <- compareBytestreams(bs.getBlob(sp), twoItsData)
+    } yield ()
   }
 
-  test("check the length of the data for four requests") {
+  test("check the checksum of the data for four requests") {
     for {
       bucket <- memoBucket
       sp <- fourItsSp
-      gotten <- bs.getBlob(sp).compile.foldChunks(0L) { case (accum, next) => accum + next.size }
-    } yield assertEquals(gotten, fourItsBytes)
+      _ <- compareBytestreams(bs.getBlob(sp), fourItsData)
+    } yield ()
   }
 
   val failBytes = 1024L * 256L * 3

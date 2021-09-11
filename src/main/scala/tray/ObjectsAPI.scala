@@ -221,7 +221,8 @@ object ObjectsAPI {
     def getRange(path: StoragePath, offset: Long, end: Long, chunkFactor: Int = 1): Stream[F, Byte] =
       Stream.eval(auth.getHeader).flatMap { headers =>
         val thisChunk = RECOMMENDED_SIZE * chunkFactor
-        val thisEnd = Math.min(offset + thisChunk, end)
+        val thisEnd = Math.min(offset + thisChunk, end) - 1 // since this is inclusive
+        println(s"thisEnd $thisEnd end $end offset $offset")
 
         val req = Request[F](
           method = Method.GET,
@@ -258,7 +259,16 @@ object ObjectsAPI {
               Stream.eval(release) >> Stream.eval(failF)
             case Some(length) =>
               val theseBytes = resp.body.onFinalize[F](release)
-              val nextBytes = getRange(path, offset + length, end, chunkFactor)
+              val nextOffset = offset + length
+              /*
+               * if we are done let the last byte be n, then nextOffset = n + 1 and end is the index + 1
+               * we can either check nextOffset - 1 == end - 1 or nextOffset - 1 == thisEnd or nextOffset == end
+               * all of which are equivalent
+               */
+              val nextBytes =
+                if (nextOffset == end) getRange(path, offset + length, end, chunkFactor)
+                else Stream.empty
+
               theseBytes ++ nextBytes
           }
         }
