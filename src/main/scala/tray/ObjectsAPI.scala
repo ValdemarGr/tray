@@ -222,7 +222,6 @@ object ObjectsAPI {
       Stream.eval(auth.getHeader).flatMap { headers =>
         val thisChunk = RECOMMENDED_SIZE * chunkFactor
         val thisEnd = Math.min(offset + thisChunk, end) - 1 // since this is inclusive
-        println(s"thisEnd $thisEnd end $end offset $offset")
 
         val req = Request[F](
           method = Method.GET,
@@ -266,8 +265,8 @@ object ObjectsAPI {
                * all of which are equivalent
                */
               val nextBytes =
-                if (nextOffset == end) getRange(path, offset + length, end, chunkFactor)
-                else Stream.empty
+                if (nextOffset == end) Stream.empty
+                else getRange(path, offset + length, end, chunkFactor)
 
               theseBytes ++ nextBytes
           }
