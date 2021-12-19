@@ -10,7 +10,6 @@ scala_library(
     deps = [
         #cats
         "@maven//:org_typelevel_cats_kernel_2_13",
-        "@maven//:org_typelevel_cats_core_2_13",
         "@maven//:org_typelevel_cats_parse_2_13",
 
         #fs2
@@ -22,5 +21,6 @@ scala_library(
         "@maven//:org_typelevel_literally_2_13",
         "@maven//:com_comcast_ip4s_core_2_13",
         "@maven//:org_typelevel_case_insensitive_2_13",
+        "@maven//:org_scala_lang_scala_library_2_13_6"
     ],
 )

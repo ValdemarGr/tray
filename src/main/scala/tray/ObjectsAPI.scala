@@ -3,8 +3,6 @@ package tray
 import fs2._
 import org.http4s.headers._
 import org.http4s._
-import cats.effect.kernel.Resource
-import org.http4s.Uri
 import cats.effect._
 import cats.implicits._
 import tray.endpoints.Endpoints
@@ -58,7 +56,7 @@ object ObjectsAPI {
           headers <- auth.getHeader
           req = Request[F](
             method = Method.POST,
-            uri = Endpoints.upload / "b" / path.bucket / "o" +? ("name", path.path) +? ("uploadType", "media"),
+            uri = Endpoints.upload / "b" / path.bucket / "o" +? (("name", path.path)) +? (("uploadType", "media")),
             body = stream,
             headers = Headers(`Content-Type`(MediaType.application.`octet-stream`), `Content-Length`(length)) ++ headers
           )
@@ -73,7 +71,7 @@ object ObjectsAPI {
 
     // These next blocks of code regard resumable uploads
     //Resume Incomplete https://cloud.google.com/storage/docs/performing-resumable-uploads#resume-upload
-    def handleHeader(resp: Response[F], doneSize: Long): F[ApiOffset] =
+    def handleHeader(resp: Response[F]): F[ApiOffset] =
       if (resp.status.code == 308) {
         for {
           range <- resp.headers.get[Range] match {
@@ -110,13 +108,13 @@ object ObjectsAPI {
         method = Method.PUT,
         uri = uri,
         headers = Headers(
-          `Content-Length`(chunk.size),
+          `Content-Length`(chunk.size.toLong),
           `Content-Range`(range = Range.SubRange(offset, offset + chunk.size - 1), endingO)
         ) // - 1 since this range is _inclusive_ of the first byte; size(0, 1, .., 99) = 100
       ).withEntity(chunk)
 
       val effect: F[ApiOffset] = client.run(req).use { resp =>
-        handleHeader(resp, chunk.size + offset)
+        handleHeader(resp)
       }
 
       effect.attempt
@@ -176,7 +174,7 @@ object ObjectsAPI {
         headers <- auth.getHeader
         req = Request[F](
           method = Method.POST,
-          uri = Endpoints.upload / "b" / path.bucket / "o" +? ("name", path.path) +? ("uploadType", "resumable"),
+          uri = Endpoints.upload / "b" / path.bucket / "o" +? (("name", path.path)) +? (("uploadType", "resumable")),
           headers = Headers(`Content-Type`(MediaType.application.`octet-stream`)) ++ headers
         )
         resp <- client
@@ -207,7 +205,7 @@ object ObjectsAPI {
       Stream.eval(auth.getHeader).flatMap { headers =>
         val req = Request[F](
           method = Method.GET,
-          uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "media"),
+          uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? (("alt", "media")),
           headers = headers
         )
 
@@ -225,7 +223,7 @@ object ObjectsAPI {
 
         val req = Request[F](
           method = Method.GET,
-          uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "media"),
+          uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? (("alt", "media")),
           headers = headers ++ Headers(Range(offset, thisEnd))
         )
 
@@ -298,7 +296,7 @@ object ObjectsAPI {
       auth.getHeader.flatMap { headers =>
         val req = Request[F](
           method = Method.GET,
-          uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? ("alt", "json"),
+          uri = Endpoints.basic / "b" / path.bucket / "o" / path.path +? (("alt", "json")),
           headers = headers
         )
 

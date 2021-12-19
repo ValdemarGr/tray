@@ -1,8 +1,10 @@
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_library")
+load("@scala_things//:flags/flags.bzl", "flags")
 
 scala_library(
     name = "tray",
     srcs = glob(["*.scala"]),
+    scalacopts = flags,
     visibility = ["//visibility:public"],
     deps = [
         "//src/main/scala/tray/auth",
@@ -15,7 +17,7 @@ scala_library(
         "@maven//:org_http4s_http4s_circe_2_13",
         "@maven//:org_http4s_http4s_client_2_13",
         "@maven//:org_http4s_http4s_core_2_13",
-        "@maven//:org_http4s_http4s_jawn_2_13",
+        "@maven//:org_scala_lang_scala_library",
         "@maven//:org_typelevel_cats_core_2_13",
         "@maven//:org_typelevel_cats_effect_2_13",
         "@maven//:org_typelevel_cats_effect_kernel_2_13",

@@ -1,12 +1,12 @@
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_library")
+load("@scala_things//:flags/flags.bzl", "flags")
 
 scala_library(
     name = "auth",
     srcs = glob(["*.scala"]),
+    scalacopts = flags,
     visibility = ["//visibility:public"],
     deps = [
-        # CE
-        "@maven//:org_typelevel_cats_kernel_2_13",
         "@maven//:org_typelevel_cats_core_2_13",
         "@maven//:org_typelevel_cats_effect_kernel_2_13",
         "@maven//:org_typelevel_cats_effect_2_13",
@@ -17,6 +17,6 @@ scala_library(
 
         # GCS
         "@maven//:com_google_auth_google_auth_library_oauth2_http",
-        "@maven//:com_google_auth_google_auth_library_credentials",
+        "@maven//:org_scala_lang_scala_library_2_13_6"
     ],
 )

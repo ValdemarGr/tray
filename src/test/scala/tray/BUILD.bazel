@@ -1,40 +1,35 @@
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_junit_test", "scala_library")
 load("@scala_things//:testing/junit_suite.bzl", "scala_junit_suite")
 
-shared_deps = [
-#CE
-  "@maven//:org_typelevel_cats_kernel_2_13",
-  "@maven//:org_typelevel_cats_core_2_13",
-  "@maven//:org_typelevel_cats_effect_kernel_2_13",
-  "@maven//:org_typelevel_cats_effect_2_13",
-  "@maven//:org_typelevel_cats_effect_std_2_13",
-
-#fs2
-  "@maven//:co_fs2_fs2_core_2_13",
-
-#http4s
-  "@maven//:org_http4s_http4s_jdk_http_client_2_13",
-  "@maven//:org_http4s_http4s_core_2_13",
-  "@maven//:org_http4s_http4s_client_2_13",
-
-#munit
-  "@maven//:org_scalameta_munit_2_13",
-  "@maven//:org_typelevel_munit_cats_effect_3_2_13",
-
-# GCS
-  "@maven//:com_google_auth_google_auth_library_oauth2_http",
-  "@maven//:com_google_auth_google_auth_library_credentials",
-  "//src/main/scala/tray",
-  "//src/main/scala/tray/auth",
-]
-
 scala_library(
     name = "util",
     srcs = ["TestUtil.scala"],
     plugins = [
         "@maven//:com_olegpy_better_monadic_for_2_13",
     ],
-    deps = shared_deps,
+    unused_dependency_checker_ignored_targets = [
+        "@maven//:com_google_auth_google_auth_library_credentials",
+    ],
+    deps = [
+        "@maven//:org_scala_lang_scala_library_2_13_6",
+        "@maven//:org_typelevel_cats_core_2_13",
+        "@maven//:org_typelevel_cats_effect_kernel_2_13",
+        "@maven//:org_typelevel_cats_effect_2_13",
+
+        #fs2
+        "@maven//:co_fs2_fs2_core_2_13",
+
+        #http4s
+        "@maven//:org_http4s_http4s_jdk_http_client_2_13",
+        "@maven//:org_http4s_http4s_client_2_13",
+        "@maven//:com_google_auth_google_auth_library_credentials",
+
+        #munit
+        "@maven//:org_scalameta_munit_2_13",
+        "@maven//:org_typelevel_munit_cats_effect_3_2_13",
+        "//src/main/scala/tray",
+        "//src/main/scala/tray/auth",
+    ],
 )
 
 scala_junit_suite(
@@ -45,9 +40,34 @@ scala_junit_suite(
         "@maven//:org_typelevel_kind_projector_2_13_6",
     ],
     suffixes = ["Test"],
-    deps = shared_deps + [
+    deps = [
         "util",
         "@maven//:org_scodec_scodec_bits_2_13",
         "@maven//:org_typelevel_vault_2_13",
-    ]
+        #CE
+        "@maven//:org_typelevel_cats_kernel_2_13",
+        "@maven//:org_typelevel_cats_core_2_13",
+        "@maven//:org_typelevel_cats_effect_kernel_2_13",
+        "@maven//:org_typelevel_cats_effect_2_13",
+        "@maven//:org_typelevel_cats_effect_std_2_13",
+        "@maven//:org_scala_lang_scala_library",
+
+        #fs2
+        "@maven//:co_fs2_fs2_core_2_13",
+
+        #http4s
+        "@maven//:org_http4s_http4s_jdk_http_client_2_13",
+        "@maven//:org_http4s_http4s_core_2_13",
+        "@maven//:org_http4s_http4s_client_2_13",
+
+        #munit
+        "@maven//:org_scalameta_munit_2_13",
+        "@maven//:org_typelevel_munit_cats_effect_3_2_13",
+
+        # GCS
+        "@maven//:com_google_auth_google_auth_library_oauth2_http",
+        "@maven//:com_google_auth_google_auth_library_credentials",
+        "//src/main/scala/tray",
+        "//src/main/scala/tray/auth",
+    ],
 )
